@@ -1090,7 +1090,12 @@ Never change log data. No text outside JSON. If request conflicts with shoulder 
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2000,
@@ -1194,9 +1199,9 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await window.storage.get(STORAGE_KEY);
-        if (res?.value) {
-          const { program: p, log: l } = JSON.parse(res.value);
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const { program: p, log: l } = JSON.parse(saved);
           if (p) setProgram(p); if (l) setLog(l);
         } else { setProgram({ 0: WEEK1_TEMPLATE }); }
       } catch (_) { setProgram({ 0: WEEK1_TEMPLATE }); }
@@ -1204,9 +1209,9 @@ export default function App() {
     })();
   }, []);
 
-  const persist = useCallback(async (p, l) => {
+  const persist = useCallback((p, l) => {
     setSaving(true);
-    try { await window.storage.set(STORAGE_KEY, JSON.stringify({ program: p, log: l })); } catch (_) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: p, log: l })); } catch (_) {}
     setTimeout(() => setSaving(false), 700);
   }, []);
 
