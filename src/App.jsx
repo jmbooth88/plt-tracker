@@ -476,7 +476,7 @@ function ExerciseInput({ value, onChange, placeholder = "Exercise name" }) {
     <div style={{ position: "relative", flex: 1 }}>
       <input value={q} onChange={e => { setQ(e.target.value); onChange(e.target.value); setOpen(true); }}
         onFocus={e => { e.target.style.borderColor = C.accent; setOpen(true); }}
-        onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder={placeholder}
+        onBlur={() => setTimeout(() => setOpen(false), 300)} placeholder={placeholder}
         style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "6px 10px", fontSize: 12, outline: "none", width: "100%", ...mono }} />
       {open && matches.length > 0 && (
         <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, maxHeight: 200, overflowY: "auto", boxShadow: "0 8px 24px #000a" }}>
@@ -839,7 +839,7 @@ Never change log data. No text outside JSON.`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-opus-4-5",
-          max_tokens: 4000,
+          max_tokens: 10000,
           system: SYSTEM,
           messages: [{ role: "user", content: `Current program:\n${JSON.stringify(currentProgram, null, 2)}\n\nRequest: ${prompt}` }],
         }),
