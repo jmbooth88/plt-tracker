@@ -1472,6 +1472,7 @@ export default function App() {
   const [dayIdx, setDayIdx]   = useState(0);
   const [tab, setTab]         = useState("log");
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const syncTimeoutRef        = useRef(null);
 
   // ── Auth listener ──────────────────────────────────────────────────────────
@@ -1565,6 +1566,9 @@ export default function App() {
     if (weights.length) allPRs[`${wi}_${dayId}_${name}`] = Math.max(...weights);
   })));
 
+  // Clamp dayIdx if days array shrinks
+  const safeDayIdx = Math.min(dayIdx, Math.max(0, days.length - 1));
+
   const weekHasData = (wi) => days.some(d => (program[wi]?.[d.id] ?? []).some(ex => (log[wi]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps)));
 
   const handleOnboardingComplete = useCallback((generatedProgram, generatedDays) => {
@@ -1579,6 +1583,22 @@ export default function App() {
   }, [user]);
 
   // ── Not authed yet ─────────────────────────────────────────────────────────
+  const handleReset = useCallback(async () => {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+    if (user && navigator.onLine) {
+      try {
+        await supabase.from("workout_data").delete().eq("user_id", user.id);
+      } catch (_) {}
+    }
+    setProgram({});
+    setLog({});
+    setDays(DAYS);
+    setWeekIdx(0);
+    setDayIdx(0);
+    setConfirmReset(false);
+    setShowOnboarding(true);
+  }, [user]);
+
   if (!authChecked) return (
     <div style={{ background: C.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ color: C.accent, letterSpacing: 3, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }}>LOADING...</div>
@@ -1621,6 +1641,18 @@ export default function App() {
           {offline && <span style={{ fontSize: 9, color: C.accent, letterSpacing: 1, ...mono }}>OFFLINE</span>}
           {syncing && <span style={{ fontSize: 9, color: C.blue, letterSpacing: 1, animation: "pulse 1s infinite", ...mono }}>SYNCING</span>}
           {saving && !syncing && <span style={{ fontSize: 9, color: C.accent, letterSpacing: 1, animation: "pulse 1s infinite", ...mono }}>SAVING</span>}
+          {confirmReset ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 9, color: C.red, letterSpacing: 1, ...mono }}>RESET ALL DATA?</span>
+              <button onClick={handleReset} style={{ background: C.red, border: "none", borderRadius: 4, color: "#fff", padding: "4px 10px", cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1, ...mono }}>YES</button>
+              <button onClick={() => setConfirmReset(false)} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 4, color: C.muted, padding: "4px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, ...mono }}>CANCEL</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmReset(true)} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 4, color: C.muted, padding: "4px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, ...mono }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = C.accent} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
+              RESET PROGRAM
+            </button>
+          )}
           <button onClick={() => supabase.auth.signOut()} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 4, color: C.muted, padding: "4px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, ...mono }}
             onMouseEnter={e => e.currentTarget.style.borderColor = C.red} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
             SIGN OUT
@@ -1647,14 +1679,14 @@ export default function App() {
               {days.map((d, i) => {
                 const hasLog = (program[weekIdx]?.[d.id] ?? []).some(ex => (log[weekIdx]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps));
                 return (
-                  <button key={d.id} onClick={() => setDayIdx(i)} style={{ background: dayIdx === i ? (hasLog ? C.green : C.accent) : "none", border: `1px solid ${dayIdx === i ? (hasLog ? C.green : C.accent) : C.border}`, borderRadius: 4, color: dayIdx === i ? "#000" : C.muted, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontWeight: dayIdx === i ? 700 : 400, transition: "all .15s", ...mono }}>
+                  <button key={d.id} onClick={() => setDayIdx(i)} style={{ background: safeDayIdx === i ? (hasLog ? C.green : C.accent) : "none", border: `1px solid ${safeDayIdx === i ? (hasLog ? C.green : C.accent) : C.border}`, borderRadius: 4, color: safeDayIdx === i ? "#000" : C.muted, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontWeight: dayIdx === i ? 700 : 400, transition: "all .15s", ...mono }}>
                     {d.label.slice(0, 3).toUpperCase()}{hasLog && <span style={{ marginLeft: 4, fontSize: 8 }}>✓</span>}
                   </button>
                 );
               })}
             </div>
             <ReadinessBanner />
-            <DayPanel day={days[dayIdx]} weekIdx={weekIdx} program={program} log={log} onUpdateProgram={updateProgram} onUpdateLog={updateLog} allPRs={allPRs} />
+            <DayPanel day={days[safeDayIdx]} weekIdx={weekIdx} program={program} log={log} onUpdateProgram={updateProgram} onUpdateLog={updateLog} allPRs={allPRs} />
           </>
         )}
         {tab === "progress" && <ProgressTab program={program} log={log} />}
