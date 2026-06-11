@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, loadFromSupabase, saveToSupabase } from "./supabase.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "plt_tracker_v3";
@@ -83,66 +82,26 @@ const C = {
 const mono = { fontFamily: "'IBM Plex Mono', monospace" };
 const serif = { fontFamily: "'Playfair Display', serif" };
 
-// ─── Auth Screen ──────────────────────────────────────────────────────────────
-function AuthScreen() {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const signIn = async () => {
-    setLoading(true);
-    setError(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
-    });
-    if (error) { setError(error.message); setLoading(false); }
-  };
-
-  return (
-    <div style={{
-      background: C.bg, minHeight: "100vh", display: "flex",
-      alignItems: "center", justifyContent: "center", padding: 24,
-    }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap');`}</style>
-      <div style={{ textAlign: "center", maxWidth: 320 }}>
-        <div style={{ ...serif, fontSize: 28, color: C.text, marginBottom: 6 }}>
-          Performance & Longevity
-        </div>
-        <div style={{ fontSize: 10, color: C.muted, letterSpacing: 2, marginBottom: 48, ...mono }}>
-          TRAINING TRACKER · 12-WEEK CYCLE
-        </div>
-        <button onClick={signIn} disabled={loading} style={{
-          background: loading ? C.faint : C.accent,
-          border: "none", borderRadius: 6, color: "#000",
-          padding: "14px 32px", cursor: loading ? "wait" : "pointer",
-          fontSize: 12, fontWeight: 700, letterSpacing: 1,
-          width: "100%", transition: "all .15s", ...mono,
-        }}>
-          {loading ? "SIGNING IN..." : "SIGN IN WITH GOOGLE"}
-        </button>
-        {error && <div style={{ marginTop: 12, color: C.red, fontSize: 11, ...mono }}>{error}</div>}
-        <div style={{ marginTop: 20, fontSize: 10, color: C.muted, lineHeight: 1.7, ...mono }}>
-          Your data is private and synced across all your devices.
-          Share the app URL with anyone — they sign in with their own Google account
-          and get their own separate data.
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Garmin Readiness ─────────────────────────────────────────────────────────
 function getReadinessCue(battery, hrvTrend) {
   if (!battery && !hrvTrend) return null;
   const bb = parseInt(battery) || 0;
-  if (bb > 0 && bb < 50) return { level: "reduced", color: C.red, label: "REDUCE INTENSITY",
-    detail: `Body Battery ${bb} — below threshold. Drop compounds to 3×3, reduce RDL load ~20%. Technique-only day.` };
-  if (hrvTrend === "down") return { level: "reduced", color: C.red, label: "REDUCE INTENSITY",
-    detail: "HRV downtrend — systemic fatigue accumulating. Pull one working set per compound. Technique over load." };
-  if ((bb > 0 && bb < 70) || hrvTrend === "flat") return { level: "moderate", color: C.accent, label: "MAINTAIN TARGETS",
-    detail: `Body Battery ${bb || "—"}. Proceed as programmed. Hit RPE targets exactly — not above.` };
-  if (bb >= 70 || hrvTrend === "up") return { level: "green", color: C.green, label: "GO AS PROGRAMMED",
-    detail: `Body Battery ${bb || "—"} — well-recovered. Full volume. Can nudge RPE ceiling +0.5 on top sets only.` };
+  if (bb > 0 && bb < 50) {
+    return { level: "reduced", color: C.red, label: "REDUCE INTENSITY",
+      detail: `Body Battery ${bb} — below threshold. Drop compounds to 3×3, reduce RDL load ~20%. Technique-only day. Do not chase load.` };
+  }
+  if (hrvTrend === "down") {
+    return { level: "reduced", color: C.red, label: "REDUCE INTENSITY",
+      detail: "HRV downtrend across 7 days — systemic fatigue accumulating. Pull one working set per compound movement. Prioritize technique over load." };
+  }
+  if ((bb > 0 && bb < 70) || hrvTrend === "flat") {
+    return { level: "moderate", color: C.accent, label: "MAINTAIN TARGETS",
+      detail: `Body Battery ${bb || "—"}. Proceed as programmed. No PRs, no extra sets. Hit your RPE targets exactly — not above.` };
+  }
+  if (bb >= 70 || hrvTrend === "up") {
+    return { level: "green", color: C.green, label: "GO AS PROGRAMMED",
+      detail: `Body Battery ${bb || "—"} — well-recovered. Full volume as programmed. If everything moves clean, you can nudge RPE ceiling +0.5 on top sets only.` };
+  }
   return null;
 }
 
@@ -164,12 +123,14 @@ function RestTimer({ seconds, onDone, onSkip }) {
             try {
               const ctx = new (window.AudioContext || window.webkitAudioContext)();
               [0, 0.18, 0.36].forEach(t => {
-                const osc = ctx.createOscillator(); const gain = ctx.createGain();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
                 osc.connect(gain); gain.connect(ctx.destination);
                 osc.frequency.value = 880;
                 gain.gain.setValueAtTime(0.3, ctx.currentTime + t);
                 gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.25);
-                osc.start(ctx.currentTime + t); osc.stop(ctx.currentTime + t + 0.3);
+                osc.start(ctx.currentTime + t);
+                osc.stop(ctx.currentTime + t + 0.3);
               });
             } catch (_) {}
             setTimeout(onDone, 400);
@@ -184,15 +145,24 @@ function RestTimer({ seconds, onDone, onSkip }) {
 
   const pct = remaining / seconds;
   const r = 28, circ = 2 * Math.PI * r;
-  const mins = Math.floor(remaining / 60), secs = remaining % 60;
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, background: "#0D0D0D", border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 16px" }}>
+    <div style={{
+      display: "flex", alignItems: "center", gap: 14,
+      background: "#0D0D0D", border: `1px solid ${C.border}`,
+      borderRadius: 8, padding: "12px 16px",
+    }}>
       <svg width={68} height={68} style={{ flexShrink: 0 }}>
         <circle cx={34} cy={34} r={r} fill="none" stroke={C.faint} strokeWidth={3} />
         <circle cx={34} cy={34} r={r} fill="none" stroke={C.accent} strokeWidth={3}
-          strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)} strokeLinecap="round"
-          transform="rotate(-90 34 34)" style={{ transition: "stroke-dashoffset 1s linear" }} />
+          strokeDasharray={circ}
+          strokeDashoffset={circ * (1 - pct)}
+          strokeLinecap="round"
+          transform="rotate(-90 34 34)"
+          style={{ transition: "stroke-dashoffset 1s linear" }}
+        />
         <text x={34} y={34} textAnchor="middle" dominantBaseline="central"
           fill={remaining === 0 ? C.green : C.accent} fontSize={13}
           fontFamily="'IBM Plex Mono', monospace" fontWeight={700}>
@@ -205,8 +175,14 @@ function RestTimer({ seconds, onDone, onSkip }) {
           {remaining === 0 ? "Go — load the bar" : `${remaining}s remaining`}
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <button onClick={() => setActive(p => !p)} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: C.muted, cursor: "pointer", padding: "3px 10px", fontSize: 9, letterSpacing: 1, ...mono }}>{active ? "PAUSE" : "RESUME"}</button>
-          <button onClick={onSkip} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: C.muted, cursor: "pointer", padding: "3px 10px", fontSize: 9, letterSpacing: 1, ...mono }}>SKIP</button>
+          <button onClick={() => setActive(p => !p)} style={{
+            background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
+            color: C.muted, cursor: "pointer", padding: "3px 10px", fontSize: 9, letterSpacing: 1, ...mono,
+          }}>{active ? "PAUSE" : "RESUME"}</button>
+          <button onClick={onSkip} style={{
+            background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
+            color: C.muted, cursor: "pointer", padding: "3px 10px", fontSize: 9, letterSpacing: 1, ...mono,
+          }}>SKIP</button>
         </div>
       </div>
     </div>
@@ -243,77 +219,147 @@ function QuickLogModal({ ex, logData, onUpdateLog, onClose }) {
     onUpdateLog({ ...logData, sets: newSets, workingWeight: +weight });
     setRpe("");
     const newLogged = newSets.filter(s => s.weight && s.reps).length;
-    if (restDuration > 0 && newLogged < targetSets) { setTimerKey(k => k + 1); setShowTimer(true); }
+    if (restDuration > 0 && newLogged < targetSets) {
+      setTimerKey(k => k + 1);
+      setShowTimer(true);
+    }
   };
 
   const bestWeight = loggedSets.length ? Math.max(...loggedSets.map(s => +s.weight)) : null;
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderLeft: `4px solid ${catColor}`, borderRadius: 10, padding: 22, width: "100%", maxWidth: 420, boxShadow: "0 32px 80px #000", animation: "slideUp .2s ease" }}>
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 200,
+      background: "rgba(0,0,0,0.88)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+    }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{
+        background: C.surface, border: `1px solid ${C.border}`,
+        borderLeft: `4px solid ${catColor}`, borderRadius: 10,
+        padding: 22, width: "100%", maxWidth: 420,
+        boxShadow: "0 32px 80px #000",
+        animation: "slideUp .2s ease",
+      }}>
+        {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
           <div>
             <div style={{ ...serif, fontSize: 19, color: C.text }}>{ex.name}</div>
-            <div style={{ fontSize: 10, color: C.accent, letterSpacing: 1, marginTop: 3, ...mono }}>{ex.sets} × {ex.reps}{ex.rpe ? ` @ RPE ${ex.rpe}` : ""}</div>
+            <div style={{ fontSize: 10, color: C.accent, letterSpacing: 1, marginTop: 3, ...mono }}>
+              {ex.sets} × {ex.reps}{ex.rpe ? ` @ RPE ${ex.rpe}` : ""}
+            </div>
             {ex.note && <div style={{ fontSize: 10, color: C.muted, fontStyle: "italic", marginTop: 4, lineHeight: 1.5 }}>{ex.note}</div>}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 20, padding: 0, lineHeight: 1 }}>✕</button>
         </div>
+
+        {/* Set progress bar */}
         <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
           {Array.from({ length: targetSets }, (_, i) => (
-            <div key={i} style={{ height: 4, flex: 1, borderRadius: 2, background: i < loggedSets.length ? catColor : C.faint, transition: "background .25s" }} />
+            <div key={i} style={{
+              height: 4, flex: 1, borderRadius: 2,
+              background: i < loggedSets.length ? catColor : C.faint,
+              transition: "background .25s",
+            }} />
           ))}
         </div>
         <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 14, textAlign: "center", ...mono }}>
           {done ? "ALL SETS COMPLETE" : `SET ${loggedSets.length + 1} OF ${targetSets}`}
         </div>
+
+        {/* Rest timer */}
         {showTimer && !done && (
           <div style={{ marginBottom: 16 }}>
             <RestTimer key={timerKey} seconds={restDuration} onDone={() => setShowTimer(false)} onSkip={() => setShowTimer(false)} />
           </div>
         )}
+
+        {/* Input area */}
         {!done && !showTimer && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
               <div>
                 <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>WEIGHT (lbs)</div>
                 <input type="number" value={weight} onChange={e => setWeight(e.target.value)} autoFocus
-                  style={{ background: C.bg, border: `1px solid ${C.accentDim}`, borderRadius: 6, color: C.accent, padding: "12px 10px", fontSize: 24, fontWeight: 700, width: "100%", outline: "none", textAlign: "center", ...mono }}
-                  onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.accentDim} />
+                  style={{
+                    background: C.bg, border: `1px solid ${C.accentDim}`, borderRadius: 6,
+                    color: C.accent, padding: "12px 10px", fontSize: 24, fontWeight: 700,
+                    width: "100%", outline: "none", textAlign: "center", ...mono,
+                  }}
+                  onFocus={e => e.target.style.borderColor = C.accent}
+                  onBlur={e => e.target.style.borderColor = C.accentDim}
+                />
               </div>
               <div>
                 <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>REPS</div>
                 <input type="number" value={reps} onChange={e => setReps(e.target.value)}
-                  style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: "12px 10px", fontSize: 24, fontWeight: 700, width: "100%", outline: "none", textAlign: "center", ...mono }}
-                  onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  style={{
+                    background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6,
+                    color: C.text, padding: "12px 10px", fontSize: 24, fontWeight: 700,
+                    width: "100%", outline: "none", textAlign: "center", ...mono,
+                  }}
+                  onFocus={e => e.target.style.borderColor = C.accent}
+                  onBlur={e => e.target.style.borderColor = C.border}
+                />
               </div>
             </div>
+
+            {/* RPE quick-select */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 7, ...mono }}>RPE</div>
               <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                 {[6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(r => (
                   <button key={r} onClick={() => setRpe(rpe === String(r) ? "" : String(r))}
-                    style={{ background: rpe === String(r) ? (r >= 9 ? C.red : r >= 7 ? C.accent : C.green) : C.faint, border: "none", borderRadius: 4, color: rpe === String(r) ? "#000" : C.muted, padding: "6px 9px", cursor: "pointer", fontSize: 10, fontWeight: 700, transition: "all .1s", ...mono }}>
+                    style={{
+                      background: rpe === String(r) ? (r >= 9 ? C.red : r >= 7 ? C.accent : C.green) : C.faint,
+                      border: "none", borderRadius: 4,
+                      color: rpe === String(r) ? "#000" : C.muted,
+                      padding: "6px 9px", cursor: "pointer", fontSize: 10, fontWeight: 700,
+                      transition: "all .1s", ...mono,
+                    }}>
                     {r}
                   </button>
                 ))}
               </div>
             </div>
-            {ex.pr && weight && <div style={{ fontSize: 10, color: C.accentDim, marginBottom: 14, textAlign: "center", ...mono }}>{Math.round((+weight / ex.pr) * 100)}% of pre-layoff PR ({ex.pr} lbs)</div>}
-            <button onClick={logSet} disabled={!weight || !reps} style={{ width: "100%", background: (!weight || !reps) ? C.faint : catColor, border: "none", borderRadius: 6, color: "#000", padding: "14px", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: (!weight || !reps) ? "default" : "pointer", transition: "all .15s", ...mono }}>
+
+            {/* PR context */}
+            {ex.pr && weight && (
+              <div style={{ fontSize: 10, color: C.accentDim, marginBottom: 14, textAlign: "center", ...mono }}>
+                {Math.round((+weight / ex.pr) * 100)}% of pre-layoff PR ({ex.pr} lbs)
+              </div>
+            )}
+
+            <button onClick={logSet} disabled={!weight || !reps} style={{
+              width: "100%", background: (!weight || !reps) ? C.faint : catColor,
+              border: "none", borderRadius: 6, color: "#000", padding: "14px",
+              fontSize: 11, fontWeight: 700, letterSpacing: 2,
+              cursor: (!weight || !reps) ? "default" : "pointer",
+              transition: "all .15s", ...mono,
+            }}>
               LOG SET {loggedSets.length + 1}
             </button>
           </>
         )}
+
+        {/* Completion state */}
         {done && (
           <div style={{ textAlign: "center", padding: "8px 0" }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
             <div style={{ fontSize: 12, color: C.green, letterSpacing: 2, ...mono }}>ALL SETS COMPLETE</div>
-            {bestWeight && ex.pr && <div style={{ fontSize: 10, color: C.muted, marginTop: 6, ...mono }}>{bestWeight >= ex.pr ? "🏅 PR MATCHED OR EXCEEDED" : `${Math.round(bestWeight / ex.pr * 100)}% of pre-layoff PR`}</div>}
-            <button onClick={onClose} style={{ marginTop: 16, background: C.green, border: "none", borderRadius: 6, color: "#000", padding: "11px 28px", cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 1, ...mono }}>DONE</button>
+            {bestWeight && ex.pr && (
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 6, ...mono }}>
+                {bestWeight >= ex.pr ? "🏅 PR MATCHED OR EXCEEDED" : `${Math.round(bestWeight / ex.pr * 100)}% of pre-layoff PR`}
+              </div>
+            )}
+            <button onClick={onClose} style={{
+              marginTop: 16, background: C.green, border: "none", borderRadius: 6,
+              color: "#000", padding: "11px 28px", cursor: "pointer",
+              fontSize: 11, fontWeight: 700, letterSpacing: 1, ...mono,
+            }}>DONE</button>
           </div>
         )}
+
+        {/* Session summary */}
         {loggedSets.length > 0 && (
           <div style={{ marginTop: 16, borderTop: `1px solid ${C.faint}`, paddingTop: 12 }}>
             <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>SESSION LOG</div>
@@ -339,34 +385,63 @@ function ReadinessBanner() {
 
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, marginBottom: 16, overflow: "hidden" }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", cursor: "pointer" }}>
+      <div onClick={() => setOpen(o => !o)} style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 14px", cursor: "pointer",
+      }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: cue ? cue.color : C.muted, boxShadow: cue ? `0 0 8px ${cue.color}55` : "none", transition: "all .3s" }} />
+          <div style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: cue ? cue.color : C.muted,
+            boxShadow: cue ? `0 0 8px ${cue.color}55` : "none",
+            transition: "all .3s",
+          }} />
           <span style={{ fontSize: 10, letterSpacing: 1, color: C.muted, ...mono }}>GARMIN READINESS</span>
           {cue && <span style={{ fontSize: 10, color: cue.color, fontWeight: 700, letterSpacing: 1, ...mono }}>{cue.label}</span>}
-          {!cue && <span style={{ fontSize: 10, color: C.muted, ...mono }}>— enter Body Battery + HRV for session protocol</span>}
+          {!cue && <span style={{ fontSize: 10, color: C.muted, ...mono }}>— enter Body Battery + HRV to get session protocol</span>}
         </div>
         <span style={{ fontSize: 10, color: C.muted }}>{open ? "▲" : "▼"}</span>
       </div>
+
       {open && (
         <div style={{ padding: "0 14px 14px", borderTop: `1px solid ${C.faint}` }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
             <div>
               <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>BODY BATTERY</div>
               <input type="number" min={0} max={100} value={battery} onChange={e => setBattery(e.target.value)} placeholder="0–100"
-                style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "8px 10px", fontSize: 16, fontWeight: 700, width: "100%", outline: "none", textAlign: "center", ...mono }}
-                onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                style={{
+                  background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4,
+                  color: C.text, padding: "8px 10px", fontSize: 16, fontWeight: 700,
+                  width: "100%", outline: "none", textAlign: "center", ...mono,
+                }}
+                onFocus={e => e.target.style.borderColor = C.accent}
+                onBlur={e => e.target.style.borderColor = C.border}
+              />
             </div>
             <div>
               <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>HRV TREND (7-DAY)</div>
               <div style={{ display: "flex", gap: 6 }}>
                 {[["up","↑",C.green],["flat","→",C.accent],["down","↓",C.red]].map(([v, icon, color]) => (
-                  <button key={v} onClick={() => setHrvTrend(hrvTrend === v ? "" : v)} style={{ flex: 1, background: hrvTrend === v ? color : C.faint, border: "none", borderRadius: 4, color: hrvTrend === v ? "#000" : C.muted, padding: "8px 4px", cursor: "pointer", fontSize: 16, fontWeight: 700, transition: "all .15s" }}>{icon}</button>
+                  <button key={v} onClick={() => setHrvTrend(hrvTrend === v ? "" : v)} style={{
+                    flex: 1, background: hrvTrend === v ? color : C.faint,
+                    border: "none", borderRadius: 4,
+                    color: hrvTrend === v ? "#000" : C.muted,
+                    padding: "8px 4px", cursor: "pointer", fontSize: 16, fontWeight: 700,
+                    transition: "all .15s",
+                  }}>{icon}</button>
                 ))}
               </div>
             </div>
           </div>
-          {cue && <div style={{ marginTop: 12, padding: "10px 14px", background: C.bg, borderLeft: `3px solid ${cue.color}`, borderRadius: 4, fontSize: 11, color: C.text, lineHeight: 1.65 }}>{cue.detail}</div>}
+          {cue && (
+            <div style={{
+              marginTop: 12, padding: "10px 14px",
+              background: C.bg, borderLeft: `3px solid ${cue.color}`,
+              borderRadius: 4, fontSize: 11, color: C.text, lineHeight: 1.65,
+            }}>
+              {cue.detail}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -377,18 +452,26 @@ function ReadinessBanner() {
 function Sparkline({ data, w = 100, h = 28, color }) {
   const col = color || C.accent;
   const pts = data.filter(Boolean);
-  if (pts.length < 2) return <svg width={w} height={h}><line x1={0} y1={h/2} x2={w} y2={h/2} stroke={C.faint} strokeWidth={1} /></svg>;
+  if (pts.length < 2) return (
+    <svg width={w} height={h}><line x1={0} y1={h/2} x2={w} y2={h/2} stroke={C.faint} strokeWidth={1} /></svg>
+  );
   const min = Math.min(...pts), max = Math.max(...pts), range = max - min || 1;
   const xs = data.map((_, i) => (i / (data.length - 1)) * w);
   const ys = data.map(v => v == null ? null : h - ((v - min) / range) * (h - 6) - 3);
   const validIdx = data.map((v, i) => v != null ? i : -1).filter(i => i >= 0);
   const segs = []; let seg = [];
-  data.forEach((v, i) => { if (v != null) seg.push(`${xs[i]},${ys[i]}`); else if (seg.length) { segs.push(seg.join(" ")); seg = []; } });
+  data.forEach((v, i) => {
+    if (v != null) seg.push(`${xs[i]},${ys[i]}`);
+    else if (seg.length) { segs.push(seg.join(" ")); seg = []; }
+  });
   if (seg.length) segs.push(seg.join(" "));
   return (
     <svg width={w} height={h} style={{ overflow: "visible" }}>
       {segs.map((s, i) => <polyline key={i} points={s} fill="none" stroke={col} strokeWidth={1.5} strokeLinecap="round" />)}
-      {validIdx.map(i => <circle key={i} cx={xs[i]} cy={ys[i]} r={i === validIdx.at(-1) ? 3 : 2} fill={i === validIdx.at(-1) ? col : C.card} stroke={col} strokeWidth={1.2} />)}
+      {validIdx.map(i => (
+        <circle key={i} cx={xs[i]} cy={ys[i]} r={i === validIdx.at(-1) ? 3 : 2}
+          fill={i === validIdx.at(-1) ? col : C.card} stroke={col} strokeWidth={1.2} />
+      ))}
     </svg>
   );
 }
@@ -396,8 +479,14 @@ function Sparkline({ data, w = 100, h = 28, color }) {
 // ─── Area Chart ───────────────────────────────────────────────────────────────
 function AreaChart({ data, w = 680, h = 80, color = C.accent, label = "" }) {
   const pts = data.filter(v => v != null);
-  if (pts.length < 2) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: h }}><span style={{ fontSize: 10, color: C.muted, ...mono }}>NOT ENOUGH DATA</span></div>;
-  const min = Math.min(...pts) * 0.93, max = Math.max(...pts) * 1.04, range = max - min || 1;
+  if (pts.length < 2) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: h }}>
+      <span style={{ fontSize: 10, color: C.muted, ...mono }}>NOT ENOUGH DATA</span>
+    </div>
+  );
+  const min = Math.min(...pts) * 0.93;
+  const max = Math.max(...pts) * 1.04;
+  const range = max - min || 1;
   const pad = 6;
   const xs = data.map((_, i) => pad + (i / (data.length - 1)) * (w - pad * 2));
   const ys = data.map(v => v == null ? null : h - pad - ((v - min) / range) * (h - pad * 2));
@@ -407,14 +496,34 @@ function AreaChart({ data, w = 680, h = 80, color = C.accent, label = "" }) {
   const areaPath = `M ${xs[first]},${h} L ${xs[first]},${ys[first]} L ${linePts} L ${xs[last]},${h} Z`;
   const linePath = `M ${xs[first]},${ys[first]} L ${linePts}`;
   const gradId = `ag-${label.replace(/\s/g, "")}`;
+
   return (
     <svg width={w} height={h + 18} style={{ overflow: "visible" }}>
-      <defs><linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.22} /><stop offset="100%" stopColor={color} stopOpacity={0} /></linearGradient></defs>
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.22} />
+          <stop offset="100%" stopColor={color} stopOpacity={0} />
+        </linearGradient>
+      </defs>
       <path d={areaPath} fill={`url(#${gradId})`} />
       <path d={linePath} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      {validIdx.map(i => <circle key={i} cx={xs[i]} cy={ys[i]} r={i === last ? 4.5 : 3} fill={i === last ? color : C.card} stroke={color} strokeWidth={1.5} />)}
-      {data.map((v, i) => i % 3 === 0 && <text key={i} x={xs[i]} y={h + 14} textAnchor="middle" fill={C.muted} fontSize={8} fontFamily="'IBM Plex Mono', monospace">W{i + 1}</text>)}
-      {validIdx.length > 0 && <text x={xs[last]} y={ys[last] - 10} textAnchor="middle" fill={color} fontSize={9} fontFamily="'IBM Plex Mono', monospace" fontWeight={700}>{data[last]} lbs</text>}
+      {validIdx.map(i => (
+        <circle key={i} cx={xs[i]} cy={ys[i]}
+          r={i === last ? 4.5 : 3}
+          fill={i === last ? color : C.card}
+          stroke={color} strokeWidth={1.5} />
+      ))}
+      {data.map((v, i) => i % 3 === 0 && (
+        <text key={i} x={xs[i]} y={h + 14} textAnchor="middle"
+          fill={C.muted} fontSize={8} fontFamily="'IBM Plex Mono', monospace">W{i + 1}</text>
+      ))}
+      {/* Value label on last point */}
+      {validIdx.length > 0 && (
+        <text x={xs[last]} y={ys[last] - 10} textAnchor="middle"
+          fill={color} fontSize={9} fontFamily="'IBM Plex Mono', monospace" fontWeight={700}>
+          {data[last]} lbs
+        </text>
+      )}
     </svg>
   );
 }
@@ -430,9 +539,16 @@ function VolumeBar({ data, w = 700, h = 60 }) {
         const x = i * (w / data.length) + 1;
         return (
           <g key={i}>
-            <rect x={x} y={h - bh} width={barW} height={bh} fill={v > 0 ? C.accent : C.faint} fillOpacity={v > 0 ? 0.75 : 0.2} rx={2} />
-            {i % 3 === 0 && <text x={x + barW / 2} y={h + 14} textAnchor="middle" fill={C.muted} fontSize={8} fontFamily="'IBM Plex Mono', monospace">W{i + 1}</text>}
-            {v > 0 && <text x={x + barW / 2} y={h - bh - 4} textAnchor="middle" fill={C.accent} fontSize={7} fontFamily="'IBM Plex Mono', monospace">{v}</text>}
+            <rect x={x} y={h - bh} width={barW} height={bh}
+              fill={v > 0 ? C.accent : C.faint} fillOpacity={v > 0 ? 0.75 : 0.2} rx={2} />
+            {i % 3 === 0 && (
+              <text x={x + barW / 2} y={h + 14} textAnchor="middle"
+                fill={C.muted} fontSize={8} fontFamily="'IBM Plex Mono', monospace">W{i + 1}</text>
+            )}
+            {v > 0 && (
+              <text x={x + barW / 2} y={h - bh - 4} textAnchor="middle"
+                fill={C.accent} fontSize={7} fontFamily="'IBM Plex Mono', monospace">{v}</text>
+            )}
           </g>
         );
       })}
@@ -457,11 +573,13 @@ function CategoryDonut({ data, size = 100 }) {
         const xi2 = cx + inner * Math.cos(angle + sweep), yi2 = cy + inner * Math.sin(angle + sweep);
         const large = sweep > Math.PI ? 1 : 0;
         const d = `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${inner} ${inner} 0 ${large} 0 ${xi1} ${yi1} Z`;
+        const color = CATEGORY_COLORS[cat] || C.muted;
         angle += sweep;
-        return <path key={cat} d={d} fill={CATEGORY_COLORS[cat] || C.muted} opacity={0.85} />;
+        return <path key={cat} d={d} fill={color} opacity={0.85} />;
       })}
       <circle cx={cx} cy={cy} r={inner - 1} fill={C.card} />
-      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fill={C.text} fontSize={11} fontFamily="'IBM Plex Mono', monospace" fontWeight={700}>{total}</text>
+      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+        fill={C.text} fontSize={11} fontFamily="'IBM Plex Mono', monospace" fontWeight={700}>{total}</text>
     </svg>
   );
 }
@@ -472,15 +590,24 @@ function ExerciseInput({ value, onChange, placeholder = "Exercise name" }) {
   const [q, setQ] = useState(value);
   useEffect(() => { setQ(value); }, [value]);
   const matches = q.length > 1 ? EXERCISE_LIBRARY.filter(e => e.toLowerCase().includes(q.toLowerCase())).slice(0, 8) : [];
+
   return (
     <div style={{ position: "relative", flex: 1 }}>
-      <input value={q} onChange={e => { setQ(e.target.value); onChange(e.target.value); setOpen(true); }}
+      <input value={q}
+        onChange={e => { setQ(e.target.value); onChange(e.target.value); setOpen(true); }}
         onFocus={e => { e.target.style.borderColor = C.accent; setOpen(true); }}
-        onBlur={() => setTimeout(() => setOpen(false), 300)} placeholder={placeholder}
-        style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "6px 10px", fontSize: 12, outline: "none", width: "100%", ...mono }} />
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "6px 10px", fontSize: 12, outline: "none", width: "100%", ...mono }}
+      />
       {open && matches.length > 0 && (
         <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, maxHeight: 200, overflowY: "auto", boxShadow: "0 8px 24px #000a" }}>
-          {matches.map(m => <div key={m} onMouseDown={() => { onChange(m); setQ(m); setOpen(false); }} style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", color: C.text, borderBottom: `1px solid ${C.faint}`, ...mono }} onMouseEnter={e => e.currentTarget.style.background = C.faint} onMouseLeave={e => e.currentTarget.style.background = "none"}>{m}</div>)}
+          {matches.map(m => (
+            <div key={m} onMouseDown={() => { onChange(m); setQ(m); setOpen(false); }}
+              style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", color: C.text, borderBottom: `1px solid ${C.faint}`, ...mono }}
+              onMouseEnter={e => e.currentTarget.style.background = C.faint}
+              onMouseLeave={e => e.currentTarget.style.background = "none"}>{m}</div>
+          ))}
         </div>
       )}
     </div>
@@ -489,29 +616,46 @@ function ExerciseInput({ value, onChange, placeholder = "Exercise name" }) {
 
 // ─── Set Logger ───────────────────────────────────────────────────────────────
 function SetLogger({ sets, onChange, workingWeight }) {
-  const addSet = () => { const last = sets.at(-1); onChange([...sets, { weight: last?.weight ?? workingWeight ?? "", reps: last?.reps ?? "", rpe: "", note: "" }]); };
+  const addSet = () => {
+    const last = sets.at(-1);
+    onChange([...sets, { weight: last?.weight ?? workingWeight ?? "", reps: last?.reps ?? "", rpe: "", note: "" }]);
+  };
   const updateSet = (i, k, v) => { const ns = [...sets]; ns[i] = { ...ns[i], [k]: v }; onChange(ns); };
   const removeSet = (i) => onChange(sets.filter((_, j) => j !== i));
+
   return (
     <div>
       {sets.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "18px 72px 52px 52px 1fr 20px", gap: 5, marginBottom: 3 }}>
-          {["", "WEIGHT", "REPS", "RPE", "NOTE", ""].map((h, i) => <span key={i} style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono }}>{h}</span>)}
+          {["", "WEIGHT", "REPS", "RPE", "NOTE", ""].map((h, i) => (
+            <span key={i} style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono }}>{h}</span>
+          ))}
         </div>
       )}
       {sets.map((s, i) => (
         <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 72px 52px 52px 1fr 20px", gap: 5, marginBottom: 4, alignItems: "center" }}>
           <span style={{ fontSize: 10, color: C.muted, textAlign: "right", ...mono }}>{i + 1}</span>
-          {["weight", "reps"].map(k => <input key={k} type="number" value={s[k]} placeholder={k === "weight" ? "lbs" : "reps"} onChange={e => updateSet(i, k, e.target.value)} style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "4px 7px", fontSize: 12, width: "100%", outline: "none", ...mono }} />)}
-          <select value={s.rpe} onChange={e => updateSet(i, "rpe", e.target.value)} style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: s.rpe ? (s.rpe >= 9 ? C.red : s.rpe >= 7 ? C.accent : C.green) : C.muted, padding: "4px", fontSize: 11, outline: "none", ...mono }}>
+          {["weight", "reps"].map(k => (
+            <input key={k} type="number" value={s[k]} placeholder={k === "weight" ? "lbs" : "reps"}
+              onChange={e => updateSet(i, k, e.target.value)}
+              style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "4px 7px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
+          ))}
+          <select value={s.rpe} onChange={e => updateSet(i, "rpe", e.target.value)}
+            style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: s.rpe ? (s.rpe >= 9 ? C.red : s.rpe >= 7 ? C.accent : C.green) : C.muted, padding: "4px", fontSize: 11, outline: "none", ...mono }}>
             <option value="">—</option>
             {[6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(r => <option key={r} value={r}>{r}</option>)}
           </select>
-          <input value={s.note} onChange={e => updateSet(i, "note", e.target.value)} placeholder="note" style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.muted, padding: "4px 7px", fontSize: 11, width: "100%", outline: "none", ...mono }} />
-          <button onClick={() => removeSet(i)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", fontSize: 13, padding: 0 }} onMouseEnter={e => e.currentTarget.style.color = C.red} onMouseLeave={e => e.currentTarget.style.color = "#333"}>✕</button>
+          <input value={s.note} onChange={e => updateSet(i, "note", e.target.value)} placeholder="note"
+            style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.muted, padding: "4px 7px", fontSize: 11, width: "100%", outline: "none", ...mono }} />
+          <button onClick={() => removeSet(i)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", fontSize: 13, padding: 0 }}
+            onMouseEnter={e => e.currentTarget.style.color = C.red} onMouseLeave={e => e.currentTarget.style.color = "#333"}>✕</button>
         </div>
       ))}
-      <button onClick={addSet} style={{ background: "none", border: `1px dashed ${C.faint}`, borderRadius: 3, color: C.muted, cursor: "pointer", padding: "4px 12px", fontSize: 10, width: "100%", letterSpacing: 1, transition: "all .15s", ...mono, marginTop: sets.length ? 4 : 0 }}
+      <button onClick={addSet} style={{
+        background: "none", border: `1px dashed ${C.faint}`, borderRadius: 3,
+        color: C.muted, cursor: "pointer", padding: "4px 12px", fontSize: 10,
+        width: "100%", letterSpacing: 1, transition: "all .15s", ...mono, marginTop: sets.length ? 4 : 0,
+      }}
         onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
         onMouseLeave={e => { e.currentTarget.style.borderColor = C.faint; e.currentTarget.style.color = C.muted; }}>
         + ADD SET
@@ -525,25 +669,37 @@ function ExerciseCard({ ex, weekIdx, dayId, logData, onUpdateLog, onUpdateEx, on
   const [expanded, setExpanded] = useState(false);
   const [editName, setEditName] = useState(false);
   const [quickLog, setQuickLog] = useState(false);
+
   const sets = logData?.sets ?? [];
   const loggedSets = sets.filter(s => s.weight && s.reps);
   const bestWeight = loggedSets.length ? Math.max(...loggedSets.map(s => +s.weight)) : null;
   const isPR = bestWeight && ex.pr && bestWeight >= ex.pr;
   const catColor = CATEGORY_COLORS[ex.category] || C.muted;
   const targetSets = parseInt(ex.sets) || 0;
-  const allDone = loggedSets.length >= targetSets && targetSets > 0;
+  const completedSets = loggedSets.length;
+  const allDone = completedSets >= targetSets && targetSets > 0;
+
   const sparkData = Array.from({ length: 12 }, (_, wi) => allPRs[`${wi}_${dayId}_${ex.name}`] ?? null);
 
   return (
     <>
-      {quickLog && <QuickLogModal ex={ex} logData={logData} onUpdateLog={d => onUpdateLog(d)} onClose={() => setQuickLog(false)} />}
-      <div style={{ background: C.card, border: `1px solid ${allDone ? "#1E2E1E" : expanded ? C.accentDim : C.border}`, borderLeft: `3px solid ${allDone ? C.green : catColor}`, borderRadius: 6, marginBottom: 8, transition: "border .15s" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer" }} onClick={() => setExpanded(e => !e)}>
+      {quickLog && (
+        <QuickLogModal ex={ex} logData={logData} onUpdateLog={d => onUpdateLog(d)} onClose={() => setQuickLog(false)} />
+      )}
+      <div style={{
+        background: C.card,
+        border: `1px solid ${allDone ? "#1E2E1E" : expanded ? C.accentDim : C.border}`,
+        borderLeft: `3px solid ${allDone ? C.green : catColor}`,
+        borderRadius: 6, marginBottom: 8, transition: "border .15s",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer" }}
+          onClick={() => setExpanded(e => !e)}>
           <div style={{ flex: 1, minWidth: 0 }}>
             {editName ? (
               <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <ExerciseInput value={ex.name} onChange={v => onUpdateEx({ ...ex, name: v })} />
-                <button onClick={e => { e.stopPropagation(); setEditName(false); }} style={{ background: C.accent, border: "none", borderRadius: 3, color: "#000", padding: "4px 10px", cursor: "pointer", fontSize: 11, ...mono }}>done</button>
+                <button onClick={e => { e.stopPropagation(); setEditName(false); }}
+                  style={{ background: C.accent, border: "none", borderRadius: 3, color: "#000", padding: "4px 10px", cursor: "pointer", fontSize: 11, ...mono }}>done</button>
               </div>
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -551,12 +707,20 @@ function ExerciseCard({ ex, weekIdx, dayId, logData, onUpdateLog, onUpdateEx, on
                 {allDone && <span style={{ fontSize: 10, color: C.green }}>✓</span>}
                 {isPR && <span style={{ fontSize: 9, letterSpacing: 1, fontWeight: 700, color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 2, padding: "1px 5px", ...mono }}>PR</span>}
                 <span style={{ fontSize: 9, letterSpacing: 1, fontWeight: 700, textTransform: "uppercase", color: catColor, border: `1px solid ${catColor}`, borderRadius: 2, padding: "1px 5px", ...mono }}>{ex.category || "lift"}</span>
-                <button onClick={e => { e.stopPropagation(); setEditName(true); }} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 10, padding: 0, ...mono }} onMouseEnter={e => e.currentTarget.style.color = C.accent} onMouseLeave={e => e.currentTarget.style.color = C.muted}>rename</button>
+                <button onClick={e => { e.stopPropagation(); setEditName(true); }}
+                  style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 10, padding: 0, ...mono }}
+                  onMouseEnter={e => e.currentTarget.style.color = C.accent} onMouseLeave={e => e.currentTarget.style.color = C.muted}>rename</button>
               </div>
             )}
             <div style={{ display: "flex", gap: 10, marginTop: 3, alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ fontSize: 10, color: C.muted, ...mono }}>{ex.sets} × {ex.reps}{ex.rpe ? ` @ RPE ${ex.rpe}` : ""}</span>
-              {targetSets > 0 && <div style={{ display: "flex", gap: 3 }}>{Array.from({ length: targetSets }, (_, i) => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: i < loggedSets.length ? catColor : C.faint }} />)}</div>}
+              {targetSets > 0 && (
+                <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                  {Array.from({ length: targetSets }, (_, i) => (
+                    <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: i < completedSets ? catColor : C.faint }} />
+                  ))}
+                </div>
+              )}
               {bestWeight && <span style={{ fontSize: 11, color: C.accent, ...mono }}>{bestWeight} lbs × {loggedSets.find(s => +s.weight === bestWeight)?.reps}</span>}
               {ex.note && <span style={{ fontSize: 10, color: C.muted, fontStyle: "italic" }}>{ex.note}</span>}
             </div>
@@ -564,46 +728,63 @@ function ExerciseCard({ ex, weekIdx, dayId, logData, onUpdateLog, onUpdateEx, on
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <Sparkline data={sparkData} />
             {ex.category !== "cardio" && (
-              <button onClick={e => { e.stopPropagation(); setQuickLog(true); }} style={{ background: allDone ? "#172217" : C.accent, border: "none", borderRadius: 4, color: allDone ? C.green : "#000", padding: "5px 10px", cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1, whiteSpace: "nowrap", transition: "all .15s", ...mono }}>
+              <button onClick={e => { e.stopPropagation(); setQuickLog(true); }} style={{
+                background: allDone ? "#172217" : C.accent,
+                border: "none", borderRadius: 4,
+                color: allDone ? C.green : "#000",
+                padding: "5px 10px", cursor: "pointer", fontSize: 9,
+                fontWeight: 700, letterSpacing: 1, whiteSpace: "nowrap",
+                transition: "all .15s", ...mono,
+              }}>
                 {allDone ? "✓" : "LOG"}
               </button>
             )}
-            <button onClick={e => { e.stopPropagation(); onRemove(); }} style={{ background: "none", border: "none", color: "#2A2A2A", cursor: "pointer", fontSize: 13, padding: 0 }} onMouseEnter={e => e.currentTarget.style.color = C.red} onMouseLeave={e => e.currentTarget.style.color = "#2A2A2A"}>✕</button>
+            <button onClick={e => { e.stopPropagation(); onRemove(); }}
+              style={{ background: "none", border: "none", color: "#2A2A2A", cursor: "pointer", fontSize: 13, padding: 0 }}
+              onMouseEnter={e => e.currentTarget.style.color = C.red} onMouseLeave={e => e.currentTarget.style.color = "#2A2A2A"}>✕</button>
             <span style={{ color: C.muted, fontSize: 12 }}>{expanded ? "▲" : "▼"}</span>
           </div>
         </div>
+
         {expanded && (
           <div style={{ padding: "0 14px 14px", borderTop: `1px solid ${C.faint}` }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, margin: "10px 0 12px" }}>
               {[{ label: "TARGET SETS", key: "sets", type: "number" }, { label: "TARGET REPS", key: "reps", type: "text" }, { label: "TARGET RPE", key: "rpe", type: "number" }].map(f => (
                 <div key={f.key}>
                   <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 3, ...mono }}>{f.label}</div>
-                  <input type={f.type} value={ex[f.key] ?? ""} onChange={e => onUpdateEx({ ...ex, [f.key]: e.target.value })} style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
+                  <input type={f.type} value={ex[f.key] ?? ""} onChange={e => onUpdateEx({ ...ex, [f.key]: e.target.value })}
+                    style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
                 </div>
               ))}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 3, ...mono }}>CATEGORY</div>
-                <select value={ex.category || ""} onChange={e => onUpdateEx({ ...ex, category: e.target.value })} style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }}>
+                <select value={ex.category || ""} onChange={e => onUpdateEx({ ...ex, category: e.target.value })}
+                  style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }}>
                   {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
                 <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 3, ...mono }}>PR WEIGHT (lbs)</div>
-                <input type="number" value={ex.pr ?? ""} placeholder="e.g. 405" onChange={e => onUpdateEx({ ...ex, pr: e.target.value ? +e.target.value : null })} style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
+                <input type="number" value={ex.pr ?? ""} placeholder="e.g. 405" onChange={e => onUpdateEx({ ...ex, pr: e.target.value ? +e.target.value : null })}
+                  style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
               </div>
             </div>
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 3, ...mono }}>COACHING NOTE</div>
-              <input value={ex.note ?? ""} onChange={e => onUpdateEx({ ...ex, note: e.target.value })} placeholder="Cue or note" style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
+              <input value={ex.note ?? ""} onChange={e => onUpdateEx({ ...ex, note: e.target.value })} placeholder="Cue or note"
+                style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
             </div>
             <div style={{ borderTop: `1px solid ${C.faint}`, paddingTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#111", border: `1px solid ${C.accentDim}`, borderRadius: 5, padding: "10px 14px", marginBottom: 14 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 9, color: C.accent, letterSpacing: 1, marginBottom: 4, ...mono }}>TODAY'S WORKING WEIGHT</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input type="number" value={logData?.workingWeight ?? ""} placeholder="lbs" onChange={e => onUpdateLog({ ...logData, workingWeight: e.target.value === "" ? null : +e.target.value, sets: logData?.sets ?? [] })} style={{ background: C.bg, border: `1px solid ${C.accentDim}`, borderRadius: 4, color: C.accent, padding: "6px 10px", fontSize: 18, fontWeight: 700, width: 100, outline: "none", textAlign: "center", ...mono }} onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.accentDim} />
+                    <input type="number" value={logData?.workingWeight ?? ""} placeholder="lbs"
+                      onChange={e => onUpdateLog({ ...logData, workingWeight: e.target.value === "" ? null : +e.target.value, sets: logData?.sets ?? [] })}
+                      style={{ background: C.bg, border: `1px solid ${C.accentDim}`, borderRadius: 4, color: C.accent, padding: "6px 10px", fontSize: 18, fontWeight: 700, width: 100, outline: "none", textAlign: "center", ...mono }}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.accentDim} />
                     <span style={{ fontSize: 12, color: C.muted, ...mono }}>lbs</span>
                   </div>
                 </div>
@@ -630,6 +811,7 @@ function DayPanel({ day, weekIdx, program, log, onUpdateProgram, onUpdateLog, al
   const exercises = program[weekIdx]?.[day.id] ?? [];
   const [adding, setAdding] = useState(false);
   const [newEx, setNewEx] = useState({ name: "", sets: 3, reps: "8", rpe: "", category: "squat", note: "", pr: null });
+
   const updateExercise = (i, val) => { const exs = [...exercises]; exs[i] = val; onUpdateProgram(weekIdx, day.id, exs); };
   const removeExercise = (i) => onUpdateProgram(weekIdx, day.id, exercises.filter((_, j) => j !== i));
   const addExercise = () => {
@@ -638,6 +820,7 @@ function DayPanel({ day, weekIdx, program, log, onUpdateProgram, onUpdateLog, al
     setNewEx({ name: "", sets: 3, reps: "8", rpe: "", category: "squat", note: "", pr: null });
     setAdding(false);
   };
+
   const totalSets = exercises.reduce((s, e) => s + (+e.sets || 0), 0);
   const loggedCount = exercises.filter(e => (log[weekIdx]?.[day.id]?.[e.name]?.sets ?? []).some(s => s.weight && s.reps)).length;
   const allComplete = loggedCount === exercises.length && exercises.length > 0;
@@ -651,15 +834,22 @@ function DayPanel({ day, weekIdx, program, log, onUpdateProgram, onUpdateLog, al
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 10, color: C.muted, ...mono }}>{day.env}</div>
-          <div style={{ fontSize: 10, color: allComplete ? C.green : C.muted, marginTop: 2, ...mono }}>{loggedCount}/{exercises.length} logged · {totalSets} sets</div>
+          <div style={{ fontSize: 10, color: allComplete ? C.green : C.muted, marginTop: 2, ...mono }}>
+            {loggedCount}/{exercises.length} logged · {totalSets} sets
+          </div>
         </div>
       </div>
+
       {exercises.map((ex, i) => (
         <ExerciseCard key={`${ex.name}-${i}`} ex={ex} weekIdx={weekIdx} dayId={day.id}
           logData={log[weekIdx]?.[day.id]?.[ex.name]}
           onUpdateLog={d => onUpdateLog(weekIdx, day.id, ex.name, d)}
-          onUpdateEx={v => updateExercise(i, v)} onRemove={() => removeExercise(i)} allPRs={allPRs} />
+          onUpdateEx={v => updateExercise(i, v)}
+          onRemove={() => removeExercise(i)}
+          allPRs={allPRs}
+        />
       ))}
+
       {adding ? (
         <div style={{ background: C.card, border: `1px solid ${C.accentDim}`, borderRadius: 6, padding: 14, marginTop: 8 }}>
           <div style={{ fontSize: 10, color: C.accent, letterSpacing: 1, marginBottom: 10, ...mono }}>ADD EXERCISE</div>
@@ -668,20 +858,23 @@ function DayPanel({ day, weekIdx, program, log, onUpdateProgram, onUpdateLog, al
             {[{ label: "SETS", key: "sets", type: "number" }, { label: "REPS", key: "reps", type: "text" }, { label: "RPE", key: "rpe", type: "number" }, { label: "PR (lbs)", key: "pr", type: "number" }].map(f => (
               <div key={f.key}>
                 <div style={{ fontSize: 9, color: C.muted, marginBottom: 3, letterSpacing: 1, ...mono }}>{f.label}</div>
-                <input type={f.type} value={newEx[f.key] ?? ""} onChange={e => setNewEx(p => ({ ...p, [f.key]: e.target.value }))} style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
+                <input type={f.type} value={newEx[f.key] ?? ""} onChange={e => setNewEx(p => ({ ...p, [f.key]: e.target.value }))}
+                  style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
               </div>
             ))}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 3, letterSpacing: 1, ...mono }}>CATEGORY</div>
-              <select value={newEx.category} onChange={e => setNewEx(p => ({ ...p, category: e.target.value }))} style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }}>
+              <select value={newEx.category} onChange={e => setNewEx(p => ({ ...p, category: e.target.value }))}
+                style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }}>
                 {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 3, letterSpacing: 1, ...mono }}>NOTE</div>
-              <input value={newEx.note} onChange={e => setNewEx(p => ({ ...p, note: e.target.value }))} placeholder="Cue" style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
+              <input value={newEx.note} onChange={e => setNewEx(p => ({ ...p, note: e.target.value }))} placeholder="Cue"
+                style={{ background: "#1A1A1A", border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, padding: "5px 8px", fontSize: 12, width: "100%", outline: "none", ...mono }} />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -690,7 +883,11 @@ function DayPanel({ day, weekIdx, program, log, onUpdateProgram, onUpdateLog, al
           </div>
         </div>
       ) : (
-        <button onClick={() => setAdding(true)} style={{ background: "none", border: `1px dashed ${C.faint}`, borderRadius: 4, color: C.muted, cursor: "pointer", padding: "8px", fontSize: 10, width: "100%", letterSpacing: 1, marginTop: 4, transition: "all .15s", ...mono }}
+        <button onClick={() => setAdding(true)} style={{
+          background: "none", border: `1px dashed ${C.faint}`, borderRadius: 4,
+          color: C.muted, cursor: "pointer", padding: "8px", fontSize: 10,
+          width: "100%", letterSpacing: 1, marginTop: 4, transition: "all .15s", ...mono,
+        }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.faint; e.currentTarget.style.color = C.muted; }}>
           + ADD EXERCISE
@@ -704,9 +901,18 @@ function DayPanel({ day, weekIdx, program, log, onUpdateProgram, onUpdateLog, al
 function ProgressTab({ program, log }) {
   const [selectedEx, setSelectedEx] = useState(null);
   const [filter, setFilter] = useState("all");
+
   const allExercises = new Set();
   Object.values(program).forEach(week => Object.values(week).forEach(day => day.forEach(ex => allExercises.add(ex.name))));
-  const weeklyVolume = Array.from({ length: 12 }, (_, wi) => { let count = 0; Object.values(log[wi] ?? {}).forEach(day => Object.values(day).forEach(exLog => { count += (exLog.sets ?? []).filter(s => s.weight && s.reps).length; })); return count; });
+
+  const weeklyVolume = Array.from({ length: 12 }, (_, wi) => {
+    let count = 0;
+    Object.values(log[wi] ?? {}).forEach(day => Object.values(day).forEach(exLog => {
+      count += (exLog.sets ?? []).filter(s => s.weight && s.reps).length;
+    }));
+    return count;
+  });
+
   const catDist = {};
   Object.values(log).forEach(week => Object.values(week).forEach(day => Object.keys(day).forEach(exName => {
     let cat = "accessory";
@@ -714,13 +920,23 @@ function ProgressTab({ program, log }) {
     const count = (day[exName]?.sets ?? []).filter(s => s.weight && s.reps).length;
     catDist[cat] = (catDist[cat] || 0) + count;
   })));
+
   const stats = Array.from(allExercises).map(name => {
-    const weeklyMax = Array.from({ length: 12 }, (_, wi) => { const allSets = Object.values(log[wi] ?? {}).flatMap(day => (day[name]?.sets ?? [])); const weights = allSets.map(s => +s.weight).filter(Boolean); return weights.length ? Math.max(...weights) : null; });
+    const weeklyMax = Array.from({ length: 12 }, (_, wi) => {
+      const allSets = Object.values(log[wi] ?? {}).flatMap(day => (day[name]?.sets ?? []));
+      const weights = allSets.map(s => +s.weight).filter(Boolean);
+      return weights.length ? Math.max(...weights) : null;
+    });
     const logged = weeklyMax.filter(Boolean);
+    const gain = logged.length >= 2 ? logged.at(-1) - logged[0] : null;
+    const bestEver = logged.length ? Math.max(...logged) : null;
     let pr = null, cat = "accessory";
-    Object.values(program).forEach(week => Object.values(week).forEach(day => day.forEach(ex => { if (ex.name === name) { if (ex.pr) pr = ex.pr; if (ex.category) cat = ex.category; } })));
-    return { name, weeklyMax, gain: logged.length >= 2 ? logged.at(-1) - logged[0] : null, bestEver: logged.length ? Math.max(...logged) : null, pr, cat, logged: logged.length };
+    Object.values(program).forEach(week => Object.values(week).forEach(day => day.forEach(ex => {
+      if (ex.name === name) { if (ex.pr) pr = ex.pr; if (ex.category) cat = ex.category; }
+    })));
+    return { name, weeklyMax, gain, bestEver, pr, cat, logged: logged.length };
   }).filter(s => s.logged > 0).sort((a, b) => b.logged - a.logged);
+
   const filtered = filter === "all" ? stats : stats.filter(s => s.cat === filter);
   const totalSetsLogged = weeklyVolume.reduce((a, b) => a + b, 0);
   const activeWeeks = weeklyVolume.filter(v => v > 0).length;
@@ -732,18 +948,31 @@ function ProgressTab({ program, log }) {
         <div style={{ ...serif, fontSize: 22, color: C.text }}>Progress Overview</div>
         <div style={{ fontSize: 10, color: C.muted, marginTop: 2, letterSpacing: 1, ...mono }}>12-WEEK CYCLE · STRENGTH & VOLUME TRACKING</div>
       </div>
+
+      {/* Summary stat strip */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
-        {[{ label: "TOTAL SETS", value: totalSetsLogged || "—", color: C.accent }, { label: "ACTIVE WEEKS", value: activeWeeks || "—", color: C.blue }, { label: "EXERCISES", value: stats.length || "—", color: C.green }, { label: "PEAK WEEK", value: bestWeek > 0 ? `${bestWeek} sets` : "—", color: C.text }].map(({ label, value, color }) => (
+        {[
+          { label: "TOTAL SETS", value: totalSetsLogged || "—", color: C.accent },
+          { label: "ACTIVE WEEKS", value: activeWeeks || "—", color: C.blue },
+          { label: "EXERCISES", value: stats.length || "—", color: C.green },
+          { label: "PEAK WEEK", value: bestWeek > 0 ? `${bestWeek} sets` : "—", color: C.text },
+        ].map(({ label, value, color }) => (
           <div key={label} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: "10px 12px", textAlign: "center" }}>
             <div style={{ fontSize: 18, fontWeight: 700, color, ...mono }}>{value}</div>
             <div style={{ fontSize: 8, color: C.muted, letterSpacing: 1, marginTop: 2, ...mono }}>{label}</div>
           </div>
         ))}
       </div>
+
+      {/* Weekly volume */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: "14px 16px", marginBottom: 16 }}>
         <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 12, ...mono }}>WEEKLY VOLUME — TOTAL SETS LOGGED</div>
-        <div style={{ overflowX: "auto" }}><VolumeBar data={weeklyVolume} w={700} h={60} /></div>
+        <div style={{ overflowX: "auto" }}>
+          <VolumeBar data={weeklyVolume} w={700} h={60} />
+        </div>
       </div>
+
+      {/* Category donut */}
       {Object.keys(catDist).length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: "14px 16px", marginBottom: 16, display: "flex", gap: 20, alignItems: "center" }}>
           <div style={{ flexShrink: 0 }}>
@@ -762,20 +991,38 @@ function ProgressTab({ program, log }) {
           </div>
         </div>
       )}
+
+      {/* Category filter */}
       {stats.length > 0 && (
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
-          <button onClick={() => setFilter("all")} style={{ background: filter === "all" ? C.accent : "none", border: `1px solid ${filter === "all" ? C.accent : C.border}`, borderRadius: 4, color: filter === "all" ? "#000" : C.muted, padding: "4px 10px", cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1, ...mono }}>ALL</button>
+          <button onClick={() => setFilter("all")} style={{
+            background: filter === "all" ? C.accent : "none", border: `1px solid ${filter === "all" ? C.accent : C.border}`,
+            borderRadius: 4, color: filter === "all" ? "#000" : C.muted,
+            padding: "4px 10px", cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1, ...mono,
+          }}>ALL</button>
           {Object.keys(CATEGORY_COLORS).filter(c => stats.some(s => s.cat === c)).map(c => (
-            <button key={c} onClick={() => setFilter(c)} style={{ background: filter === c ? CATEGORY_COLORS[c] : "none", border: `1px solid ${filter === c ? CATEGORY_COLORS[c] : C.border}`, borderRadius: 4, color: filter === c ? "#000" : C.muted, padding: "4px 10px", cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", ...mono }}>{c}</button>
+            <button key={c} onClick={() => setFilter(c)} style={{
+              background: filter === c ? CATEGORY_COLORS[c] : "none", border: `1px solid ${filter === c ? CATEGORY_COLORS[c] : C.border}`,
+              borderRadius: 4, color: filter === c ? "#000" : C.muted,
+              padding: "4px 10px", cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", ...mono,
+            }}>{c}</button>
           ))}
         </div>
       )}
-      {stats.length === 0 && <div style={{ color: C.muted, fontSize: 13, textAlign: "center", padding: "40px 0", ...mono }}>No logged sets yet. Start logging to see progress.</div>}
+
+      {stats.length === 0 && (
+        <div style={{ color: C.muted, fontSize: 13, textAlign: "center", padding: "40px 0", ...mono }}>No logged sets yet. Start logging to see progress.</div>
+      )}
+
       {filtered.map(s => {
         const isSelected = selectedEx === s.name;
         const catColor = CATEGORY_COLORS[s.cat] || C.muted;
         return (
-          <div key={s.name} style={{ background: C.card, border: `1px solid ${isSelected ? C.accentDim : C.border}`, borderLeft: `3px solid ${catColor}`, borderRadius: 6, marginBottom: 8, overflow: "hidden", cursor: "pointer", transition: "border .15s" }} onClick={() => setSelectedEx(isSelected ? null : s.name)}>
+          <div key={s.name} style={{
+            background: C.card, border: `1px solid ${isSelected ? C.accentDim : C.border}`,
+            borderLeft: `3px solid ${catColor}`, borderRadius: 6, marginBottom: 8,
+            overflow: "hidden", cursor: "pointer", transition: "border .15s",
+          }} onClick={() => setSelectedEx(isSelected ? null : s.name)}>
             <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ ...serif, fontSize: 14, color: C.text, marginBottom: 4 }}>{s.name}</div>
@@ -791,9 +1038,16 @@ function ProgressTab({ program, log }) {
             {isSelected && (
               <div style={{ padding: "0 16px 18px", borderTop: `1px solid ${C.faint}` }}>
                 <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, margin: "12px 0 10px", ...mono }}>MAX WEIGHT TREND — 12 WEEKS</div>
-                <div style={{ overflowX: "auto" }}><AreaChart data={s.weeklyMax} w={680} h={80} color={catColor} label={s.name} /></div>
+                <div style={{ overflowX: "auto" }}>
+                  <AreaChart data={s.weeklyMax} w={680} h={80} color={catColor} label={s.name} />
+                </div>
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 22 }}>
-                  {s.weeklyMax.map((v, i) => v && <div key={i} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, padding: "4px 8px", fontSize: 9, ...mono }}><span style={{ color: C.muted }}>W{i + 1} </span><span style={{ color: catColor }}>{v} lbs</span></div>)}
+                  {s.weeklyMax.map((v, i) => v && (
+                    <div key={i} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, padding: "4px 8px", fontSize: 9, ...mono }}>
+                      <span style={{ color: C.muted }}>W{i + 1} </span>
+                      <span style={{ color: catColor }}>{v} lbs</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -828,7 +1082,7 @@ Respond ONLY with valid JSON:
   "changes": [{ "week": 0, "day": "mon", "exercises": [...full array...] }]
 }
 
-Never change log data. No text outside JSON.`;
+Never change log data. No text outside JSON. If request conflicts with shoulder safety, adapt safely and explain in description.`;
 
   const run = async () => {
     if (!prompt.trim()) return;
@@ -836,10 +1090,12 @@ Never change log data. No text outside JSON.`;
     try {
       const res = await fetch("/api/claude", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          model: "claude-opus-4-5",
-          max_tokens: 10000,
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
           system: SYSTEM,
           messages: [{ role: "user", content: `Current program:\n${JSON.stringify(currentProgram, null, 2)}\n\nRequest: ${prompt}` }],
         }),
@@ -854,7 +1110,11 @@ Never change log data. No text outside JSON.`;
     setLoading(false);
   };
 
-  const apply = () => { if (!result?.changes?.length) return; onApplyUpdate(result.changes); setResult(null); setPrompt(""); };
+  const apply = () => {
+    if (!result?.changes?.length) return;
+    onApplyUpdate(result.changes);
+    setResult(null); setPrompt("");
+  };
 
   return (
     <div>
@@ -862,28 +1122,59 @@ Never change log data. No text outside JSON.`;
         <div style={{ ...serif, fontSize: 22, color: C.text }}>AI Program Update</div>
         <div style={{ fontSize: 10, color: C.muted, marginTop: 2, letterSpacing: 1, ...mono }}>SHOULDER-AWARE · CONTEXT-INFORMED · PREVIEWS BEFORE APPLYING</div>
       </div>
+
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>EXAMPLE REQUESTS</div>
-        {["Propagate Week 1 into Weeks 2–4 with 5% weekly load increases", "Replace Thursday Week 3 ruck with gym Option B", "Add hip thrust to Monday Week 2 as hinge, 3×10 @ RPE 7", "Advance pressing to DB floor press starting Week 3 Saturday", "Deload Week 6 — reduce all volume by 40%"].map(ex => (
-          <button key={ex} onClick={() => setPrompt(ex)} style={{ background: "none", border: `1px solid ${C.faint}`, borderRadius: 3, color: C.muted, cursor: "pointer", padding: "4px 10px", fontSize: 10, marginRight: 6, marginBottom: 6, transition: "all .15s", ...mono }}
+        {[
+          "Propagate Week 1 into Weeks 2–4 with 5% weekly load increases",
+          "Replace Thursday Week 3 ruck with gym Option B",
+          "Add hip thrust to Monday Week 2 as hinge, 3×10 @ RPE 7",
+          "Advance pressing to DB floor press starting Week 3 Saturday",
+          "Deload Week 6 — reduce all volume by 40%",
+        ].map(ex => (
+          <button key={ex} onClick={() => setPrompt(ex)} style={{
+            background: "none", border: `1px solid ${C.faint}`, borderRadius: 3,
+            color: C.muted, cursor: "pointer", padding: "4px 10px", fontSize: 10,
+            marginRight: 6, marginBottom: 6, transition: "all .15s", ...mono,
+          }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = C.faint; e.currentTarget.style.color = C.muted; }}>{ex}</button>
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.faint; e.currentTarget.style.color = C.muted; }}>
+            {ex}
+          </button>
         ))}
       </div>
+
       <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Describe the program change you want..." rows={3}
         style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "10px 12px", fontSize: 13, width: "100%", outline: "none", resize: "vertical", ...mono, marginBottom: 10 }}
         onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
-      <button onClick={run} disabled={loading || !prompt.trim()} style={{ background: loading ? C.accentDim : C.accent, border: "none", borderRadius: 4, color: "#000", padding: "9px 24px", cursor: loading ? "wait" : "pointer", fontSize: 12, fontWeight: 700, letterSpacing: 1, transition: "all .15s", ...mono, opacity: !prompt.trim() ? 0.5 : 1 }}>
-        {loading ? "THINKING..." : "GENERATE CHANGES"}
-      </button>
+
+      <button onClick={run} disabled={loading || !prompt.trim()} style={{
+        background: loading ? C.accentDim : C.accent, border: "none", borderRadius: 4,
+        color: "#000", padding: "9px 24px", cursor: loading ? "wait" : "pointer",
+        fontSize: 12, fontWeight: 700, letterSpacing: 1, transition: "all .15s", ...mono,
+        opacity: !prompt.trim() ? 0.5 : 1,
+      }}>{loading ? "THINKING..." : "GENERATE CHANGES"}</button>
+
       {error && <div style={{ marginTop: 12, color: C.red, fontSize: 12, ...mono }}>{error}</div>}
+
       {result && (
         <div style={{ marginTop: 16, background: C.card, border: `1px solid ${C.accentDim}`, borderRadius: 6, padding: 16 }}>
           <div style={{ fontSize: 10, color: C.accent, letterSpacing: 1, marginBottom: 8, ...mono }}>PREVIEW</div>
           <div style={{ fontSize: 13, color: C.text, marginBottom: 12, lineHeight: 1.6 }}>{result.description}</div>
-          {result.changes?.length > 0 && <div style={{ marginBottom: 12 }}>{result.changes.map((c, i) => <div key={i} style={{ background: "#0F0F0F", borderRadius: 4, padding: "8px 12px", marginBottom: 6, fontSize: 11, color: C.muted, ...mono }}><span style={{ color: C.accent }}>Week {c.week + 1} · {c.day.toUpperCase()}</span>{" — "}{c.exercises?.length} exercises</div>)}</div>}
+          {result.changes?.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              {result.changes.map((c, i) => (
+                <div key={i} style={{ background: "#0F0F0F", borderRadius: 4, padding: "8px 12px", marginBottom: 6, fontSize: 11, color: C.muted, ...mono }}>
+                  <span style={{ color: C.accent }}>Week {c.week + 1} · {c.day.toUpperCase()}</span>
+                  {" — "}{c.exercises?.length} exercises
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
-            {result.changes?.length > 0 && <button onClick={apply} style={{ background: C.accent, border: "none", borderRadius: 4, color: "#000", padding: "8px 20px", cursor: "pointer", fontSize: 11, fontWeight: 700, ...mono }}>APPLY CHANGES</button>}
+            {result.changes?.length > 0 && (
+              <button onClick={apply} style={{ background: C.accent, border: "none", borderRadius: 4, color: "#000", padding: "8px 20px", cursor: "pointer", fontSize: 11, fontWeight: 700, ...mono }}>APPLY CHANGES</button>
+            )}
             <button onClick={() => setResult(null)} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 4, color: C.muted, padding: "8px 16px", cursor: "pointer", fontSize: 11, ...mono }}>DISCARD</button>
           </div>
         </div>
@@ -892,121 +1183,471 @@ Never change log data. No text outside JSON.`;
   );
 }
 
+// ─── Program Builder ─────────────────────────────────────────────────────────
+function buildProgram(answers) {
+  const { shoulderStatus, thuEnv, dlPR, bodyweight, primaryGoal, layoffWeeks } = answers;
+
+  // Base template deep clone
+  const prog = JSON.parse(JSON.stringify(WEEK1_TEMPLATE));
+
+  // ── Trap Bar DL: inject PR if provided ──
+  const dl = prog.mon.find(e => e.name === "Trap Bar Deadlift");
+  if (dl && dlPR) dl.pr = +dlPR;
+
+  // ── Volume modifier for long layoffs ──
+  if (layoffWeeks >= 8) {
+    prog.mon.forEach(e => { if (e.sets > 2) e.sets = Math.max(2, e.sets - 1); });
+    prog.tue.forEach(e => { if (e.sets > 2) e.sets = Math.max(2, e.sets - 1); });
+    prog.sat.forEach(e => { if (e.sets > 2) e.sets = Math.max(2, e.sets - 1); });
+  }
+
+  // ── Shoulder: modify Saturday pressing ──
+  if (shoulderStatus === "pain") {
+    // Replace all pressing with band/push-up only
+    prog.sat = prog.sat.map(e => {
+      if (e.category === "push") return { ...e, name: "Push-Up", sets: 3, reps: "10–15", rpe: 6, note: "Pain-free range only. Stop at any shoulder discomfort.", pr: null };
+      return e;
+    });
+    // Remove neutral-grip DB press (duplicate push after swap)
+    const seen = new Set();
+    prog.sat = prog.sat.filter(e => { if (e.category === "push" && seen.has("push")) return false; seen.add(e.category); return true; });
+  } else if (shoulderStatus === "cautious") {
+    // Keep landmine, remove neutral-grip DB press
+    prog.sat = prog.sat.filter(e => e.name !== "Neutral-Grip DB Press");
+  }
+  // "healed" = keep template as-is
+
+  // ── Thursday: gym option B if no outdoor access ──
+  if (thuEnv === "gym") {
+    prog.thu = [
+      { name: "High Bar Back Squat",     sets: 4, reps: "5",    rpe: 7,   note: "High bar, upright torso. Depth where pelvis stays neutral.", category: "squat" },
+      { name: "Walking Lunge",           sets: 3, reps: "12",   rpe: 7,   note: "Per leg. Controlled step. Knee tracks over toe.",            category: "squat" },
+      { name: "Trap Bar Farmer's Carry", sets: 4, reps: "40yd", rpe: null,note: "Heavy. Grip, posture, pace. Rest 2 min.",                    category: "carry" },
+      { name: "Step-Up",                 sets: 3, reps: "10",   rpe: 7,   note: "Per leg. Drive through heel. Hip crease at 90° on box.",     category: "squat" },
+    ];
+  }
+
+  // ── Primary goal modifier ──
+  if (primaryGoal === "stamina") {
+    // Increase carry volume on Thursday
+    const carry = prog.thu.find(e => e.category === "carry");
+    if (carry) carry.sets = Math.min(carry.sets + 1, 5);
+  } else if (primaryGoal === "strength") {
+    // Bump DL sets
+    if (dl) dl.sets = Math.min(dl.sets + 1, 5);
+  }
+
+  return { 0: prog };
+}
+
+// ─── Onboarding Wizard ────────────────────────────────────────────────────────
+const ONBOARDING_STEPS = [
+  "welcome", "goals", "shoulder", "layoff", "thursday", "baselines", "summary"
+];
+
+function OnboardingWizard({ onComplete }) {
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState({
+    primaryGoal: "longevity",
+    shoulderStatus: "cautious",
+    layoffWeeks: 6,
+    thuEnv: "outdoor",
+    dlPR: "",
+    bodyweight: "",
+    name: "",
+  });
+  const [animDir, setAnimDir] = useState("forward");
+
+  const update = (key, val) => setAnswers(p => ({ ...p, [key]: val }));
+
+  const next = () => { setAnimDir("forward"); setStep(s => Math.min(s + 1, ONBOARDING_STEPS.length - 1)); };
+  const back = () => { setAnimDir("back"); setStep(s => Math.max(s - 1, 0)); };
+
+  const finish = () => {
+    const program = buildProgram(answers);
+    onComplete(program, answers);
+  };
+
+  const stepName = ONBOARDING_STEPS[step];
+  const isLast = step === ONBOARDING_STEPS.length - 1;
+
+  const SelectCard = ({ selected, onClick, children, color }) => (
+    <div onClick={onClick} style={{
+      border: `1px solid ${selected ? (color || C.accent) : C.border}`,
+      borderLeft: `3px solid ${selected ? (color || C.accent) : C.border}`,
+      borderRadius: 6, padding: "12px 16px", cursor: "pointer",
+      background: selected ? `${(color || C.accent)}12` : C.card,
+      transition: "all .15s", marginBottom: 8,
+    }}
+      onMouseEnter={e => { if (!selected) e.currentTarget.style.borderColor = C.borderHover; }}
+      onMouseLeave={e => { if (!selected) e.currentTarget.style.borderColor = C.border; }}
+    >
+      {children}
+    </div>
+  );
+
+  const stepContent = () => {
+    switch (stepName) {
+
+      case "welcome": return (
+        <div>
+          <div style={{ fontSize: 11, color: C.accent, letterSpacing: 3, marginBottom: 12, ...mono }}>PERFORMANCE & LONGEVITY</div>
+          <div style={{ ...serif, fontSize: 32, color: C.text, marginBottom: 8, lineHeight: 1.2 }}>Build your program.</div>
+          <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.7, marginBottom: 28 }}>
+            A few questions to generate a Week 1 training plan tailored to your current status, goals, and environment. Takes about 60 seconds.
+          </div>
+          <div style={{ borderTop: `1px solid ${C.faint}`, paddingTop: 20, marginBottom: 28 }}>
+            {[
+              ["Shoulder-aware pressing progression", C.accent],
+              ["Outdoor or gym Thursday options", C.blue],
+              ["Volume calibrated to your layoff length", C.green],
+              ["PR baselines loaded into your log", "#A07EC8"],
+            ].map(([text, col]) => (
+              <div key={text} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: col, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: C.muted, ...mono }}>{text}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>YOUR NAME (optional)</div>
+            <input value={answers.name} onChange={e => update("name", e.target.value)}
+              placeholder="First name"
+              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "10px 14px", fontSize: 14, outline: "none", width: "100%", ...mono }}
+              onFocus={e => e.target.style.borderColor = C.accent}
+              onBlur={e => e.target.style.borderColor = C.border}
+            />
+          </div>
+        </div>
+      );
+
+      case "goals": return (
+        <div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 1 OF 5</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>What's driving this?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
+            Your primary goal shapes volume, intensity, and exercise selection priorities.
+          </div>
+          {[
+            { val: "longevity", label: "Longevity & Healthspan", desc: "Train to move well for decades. Load serves function, not ego.", color: C.green },
+            { val: "strength",  label: "Strength & Performance", desc: "Rebuild and surpass pre-layoff numbers. Volume follows load.", color: C.accent },
+            { val: "stamina",   label: "Stamina & Work Capacity", desc: "Functional endurance — far under load. Carries and ruck anchor the week.", color: C.blue },
+            { val: "body",      label: "Body Composition",        desc: "Lean and functional. Strength training as the metabolic driver.", color: "#C87E96" },
+          ].map(({ val, label, desc, color }) => (
+            <SelectCard key={val} selected={answers.primaryGoal === val} onClick={() => update("primaryGoal", val)} color={color}>
+              <div style={{ fontSize: 13, color: answers.primaryGoal === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
+            </SelectCard>
+          ))}
+        </div>
+      );
+
+      case "shoulder": return (
+        <div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 2 OF 5</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Shoulder status?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
+            This determines your pressing entry point. The program uses a 5-week pressing progression: Landmine → DB Floor Press → Incline DB → Flat DB → Barbell.
+          </div>
+          {[
+            { val: "pain",     label: "Still uncomfortable", desc: "Pain or restriction present. Push-up/band pressing only. Pulls and stability this week.", color: C.red },
+            { val: "cautious", label: "Pain-free but cautious", desc: "Cleared the layoff but want to be conservative. Landmine press as the entry point.", color: C.accent },
+            { val: "healed",   label: "Fully recovered",     desc: "No restrictions. Start at landmine, can progress faster through the hierarchy.", color: C.green },
+            { val: "none",     label: "No shoulder history", desc: "No layoff, no restrictions. Standard Week 1 pressing volume.", color: C.blue },
+          ].map(({ val, label, desc, color }) => (
+            <SelectCard key={val} selected={answers.shoulderStatus === val} onClick={() => update("shoulderStatus", val)} color={color}>
+              <div style={{ fontSize: 13, color: answers.shoulderStatus === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
+            </SelectCard>
+          ))}
+        </div>
+      );
+
+      case "layoff": return (
+        <div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 3 OF 5</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Training layoff length?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
+            Determines starting volume. Longer layoffs mean reduced working sets in Week 1 — volume rebuilt progressively.
+          </div>
+          {[
+            { val: 0,  label: "No layoff",    desc: "Continuous training. No deconditioning factor." },
+            { val: 3,  label: "1–4 weeks",    desc: "Mild deconditioning. Minor volume reduction. Back to baseline by Week 3." },
+            { val: 6,  label: "4–8 weeks",    desc: "Moderate. Standard reconditioning protocol. Volume builds weekly." },
+            { val: 10, label: "8+ weeks",     desc: "Significant. Week 1 volume reduced by one working set per compound. Rebuild from the floor." },
+          ].map(({ val, label, desc }) => (
+            <SelectCard key={val} selected={answers.layoffWeeks === val} onClick={() => update("layoffWeeks", val)}>
+              <div style={{ fontSize: 13, color: answers.layoffWeeks === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
+            </SelectCard>
+          ))}
+        </div>
+      );
+
+      case "thursday": return (
+        <div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 4 OF 5</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Thursday environment?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
+            Thursday is stamina day. Outdoor Option A centers on a weighted ruck followed by split squats and kettlebell swings. Gym Option B is a squat + carry session.
+          </div>
+          <SelectCard selected={answers.thuEnv === "outdoor"} onClick={() => update("thuEnv", "outdoor")} color={C.green}>
+            <div style={{ fontSize: 13, color: answers.thuEnv === "outdoor" ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>Option A — Outdoor (Preferred)</div>
+            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>Weighted ruck (30–40 lbs, 30–45 min) + Bulgarian Split Squat + KB Swings. Highest-value session for longevity.</div>
+          </SelectCard>
+          <SelectCard selected={answers.thuEnv === "gym"} onClick={() => update("thuEnv", "gym")} color={C.blue}>
+            <div style={{ fontSize: 13, color: answers.thuEnv === "gym" ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>Option B — Gym</div>
+            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>High Bar Squat + Walking Lunge + Trap Bar Carry + Step-Up. Use when outdoor access isn't available.</div>
+          </SelectCard>
+          <SelectCard selected={answers.thuEnv === "both"} onClick={() => update("thuEnv", "both")} color={C.accent}>
+            <div style={{ fontSize: 13, color: answers.thuEnv === "both" ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>Decide week-to-week</div>
+            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>Load outdoor as default. You can swap to gym Option B any week via the AI Update tab.</div>
+          </SelectCard>
+        </div>
+      );
+
+      case "baselines": return (
+        <div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 5 OF 5</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Baseline numbers.</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
+            Used to track your reconditioning progress and calculate working weight as a percentage of your pre-layoff PR. Skip any you don't know.
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>TRAP BAR DEADLIFT — PRE-LAYOFF PR (lbs)</div>
+            <input type="number" value={answers.dlPR} onChange={e => update("dlPR", e.target.value)}
+              placeholder="e.g. 405"
+              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.accent, padding: "12px 14px", fontSize: 22, fontWeight: 700, outline: "none", width: "100%", textAlign: "center", ...mono }}
+              onFocus={e => e.target.style.borderColor = C.accent}
+              onBlur={e => e.target.style.borderColor = C.border}
+            />
+            {answers.dlPR && <div style={{ fontSize: 10, color: C.muted, marginTop: 6, textAlign: "center", ...mono }}>
+              Week 1 working weight recommendation: {Math.round(+answers.dlPR * 0.55)}–{Math.round(+answers.dlPR * 0.62)} lbs (~55–62% of PR)
+            </div>}
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>CURRENT BODYWEIGHT (lbs)</div>
+            <input type="number" value={answers.bodyweight} onChange={e => update("bodyweight", e.target.value)}
+              placeholder="e.g. 190"
+              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "12px 14px", fontSize: 22, fontWeight: 700, outline: "none", width: "100%", textAlign: "center", ...mono }}
+              onFocus={e => e.target.style.borderColor = C.accent}
+              onBlur={e => e.target.style.borderColor = C.border}
+            />
+          </div>
+
+          <div style={{ background: C.faint, borderRadius: 5, padding: "10px 14px", fontSize: 11, color: C.muted, lineHeight: 1.6 }}>
+            Additional PRs (squat, press, etc.) can be added to individual exercises from the exercise card after your program loads.
+          </div>
+        </div>
+      );
+
+      case "summary": {
+        const goalLabels = { longevity: "Longevity & Healthspan", strength: "Strength & Performance", stamina: "Stamina & Work Capacity", body: "Body Composition" };
+        const shoulderLabels = { pain: "Still uncomfortable — push-ups only", cautious: "Pain-free but cautious — landmine entry", healed: "Fully recovered — full progression", none: "No shoulder history" };
+        const thuLabels = { outdoor: "Outdoor ruck (preferred)", gym: "Gym Option B", both: "Decide week-to-week (outdoor default)" };
+        const layoffLabels = { 0: "No layoff", 3: "1–4 weeks", 6: "4–8 weeks", 10: "8+ weeks" };
+
+        return (
+          <div>
+            <div style={{ fontSize: 9, color: C.green, letterSpacing: 3, marginBottom: 10, ...mono }}>PROGRAM READY</div>
+            <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>
+              {answers.name ? `Here's your program, ${answers.name}.` : "Here's your Week 1 program."}
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
+              Review your setup below, then load the program. You can adjust anything from inside the app.
+            </div>
+
+            <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: "14px 16px", marginBottom: 16 }}>
+              {[
+                ["Primary Goal",     goalLabels[answers.primaryGoal]],
+                ["Shoulder Status",  shoulderLabels[answers.shoulderStatus]],
+                ["Layoff Length",    layoffLabels[answers.layoffWeeks]],
+                ["Thursday",         thuLabels[answers.thuEnv]],
+                answers.dlPR ? ["DL Baseline PR", `${answers.dlPR} lbs`] : null,
+                answers.bodyweight ? ["Bodyweight", `${answers.bodyweight} lbs`] : null,
+              ].filter(Boolean).map(([label, val]) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.faint}` }}>
+                  <span style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono, paddingTop: 2 }}>{label.toUpperCase()}</span>
+                  <span style={{ fontSize: 12, color: C.text, ...mono, textAlign: "right", maxWidth: "60%" }}>{val}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: "#0D1A0D", border: `1px solid #1E3A1E`, borderRadius: 6, padding: "12px 16px", marginBottom: 20 }}>
+              <div style={{ fontSize: 10, color: C.green, letterSpacing: 1, marginBottom: 6, ...mono }}>WEEK 1 STRUCTURE</div>
+              {[
+                ["MON", "Lower Strength", "Trap Bar DL · Goblet Squat · RDL · Carries"],
+                ["TUE", "Upper Pull + Rehab", "DB Row · Pull-Up · Face Pull · Band Work"],
+                ["THU", answers.thuEnv === "gym" ? "Lower Stamina — Gym" : "Lower Stamina — Outdoor", answers.thuEnv === "gym" ? "Squat · Lunge · Carry · Step-Up" : "Ruck · Split Squat · KB Swing"],
+                ["SAT", "Upper Push + Pull", answers.shoulderStatus === "pain" ? "Push-Up · Row · Band Work" : "Landmine Press · Row · Band Work"],
+              ].map(([day, focus, lifts]) => (
+                <div key={day} style={{ display: "flex", gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 10, color: C.green, fontWeight: 700, ...mono, minWidth: 28 }}>{day}</span>
+                  <div>
+                    <div style={{ fontSize: 11, color: C.text, ...mono }}>{focus}</div>
+                    <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{lifts}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      default: return null;
+    }
+  };
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.text }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        input::placeholder { color: #444; }
+        @keyframes fadeSlide { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
+
+      {/* Progress bar */}
+      <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 2, background: C.faint, zIndex: 100 }}>
+        <div style={{
+          height: "100%", background: C.accent,
+          width: `${((step) / (ONBOARDING_STEPS.length - 1)) * 100}%`,
+          transition: "width .4s ease",
+        }} />
+      </div>
+
+      {/* Header */}
+      <div style={{ padding: "20px 24px 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 10, color: C.muted, letterSpacing: 2, ...mono }}>PERFORMANCE & LONGEVITY</div>
+        {step > 0 && step < ONBOARDING_STEPS.length - 1 && (
+          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono }}>
+            {step} / {ONBOARDING_STEPS.length - 2}
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 24px 100px", animation: "fadeSlide .25s ease" }}
+        key={step}>
+        {stepContent()}
+      </div>
+
+      {/* Navigation footer */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: C.bg, borderTop: `1px solid ${C.border}`,
+        padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        {step > 0 ? (
+          <button onClick={back} style={{
+            background: "none", border: `1px solid ${C.border}`, borderRadius: 5,
+            color: C.muted, padding: "10px 20px", cursor: "pointer",
+            fontSize: 10, fontWeight: 700, letterSpacing: 1, ...mono,
+          }}>← BACK</button>
+        ) : <div />}
+
+        {isLast ? (
+          <button onClick={finish} style={{
+            background: C.green, border: "none", borderRadius: 5,
+            color: "#000", padding: "12px 32px", cursor: "pointer",
+            fontSize: 11, fontWeight: 700, letterSpacing: 2, ...mono,
+          }}>LOAD MY PROGRAM →</button>
+        ) : (
+          <button onClick={next} style={{
+            background: C.accent, border: "none", borderRadius: 5,
+            color: "#000", padding: "12px 28px", cursor: "pointer",
+            fontSize: 11, fontWeight: 700, letterSpacing: 2, ...mono,
+          }}>{step === 0 ? "GET STARTED →" : "NEXT →"}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [user, setUser]       = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [program, setProgram] = useState({});
-  const [log, setLog]         = useState({});
-  const [loaded, setLoaded]   = useState(false);
-  const [saving, setSaving]   = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [offline, setOffline] = useState(!navigator.onLine);
-  const [weekIdx, setWeekIdx] = useState(0);
-  const [dayIdx, setDayIdx]   = useState(0);
-  const [tab, setTab]         = useState("log");
-  const syncTimeoutRef        = useRef(null);
+  const [program, setProgram]               = useState({});
+  const [log, setLog]                       = useState({});
+  const [loaded, setLoaded]                 = useState(false);
+  const [saving, setSaving]                 = useState(false);
+  const [weekIdx, setWeekIdx]               = useState(0);
+  const [dayIdx, setDayIdx]                 = useState(0);
+  const [tab, setTab]                       = useState("log");
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
-  // ── Auth listener ──────────────────────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setAuthChecked(true);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setUser(session?.user ?? null);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // ── Online/offline detection ───────────────────────────────────────────────
-  useEffect(() => {
-    const goOnline = () => setOffline(false);
-    const goOffline = () => setOffline(true);
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
-    return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); };
-  }, []);
-
-  // ── Load data ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!authChecked || !user) return;
     (async () => {
-      // Always load from localStorage first (instant)
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) { const { program: p, log: l } = JSON.parse(saved); if (p) setProgram(p); if (l) setLog(l); }
-        else setProgram({ 0: WEEK1_TEMPLATE });
+        if (saved) {
+          const { program: p, log: l } = JSON.parse(saved);
+          if (p) setProgram(p); if (l) setLog(l);
+        } else {
+          setShowOnboarding(true);
+        }
       } catch (_) { setProgram({ 0: WEEK1_TEMPLATE }); }
       setLoaded(true);
-
-      // Then try to load from Supabase (may be more up to date from another device)
-      if (navigator.onLine) {
-        try {
-          const data = await loadFromSupabase(user.id);
-          if (data) {
-            setProgram(data.program || {});
-            setLog(data.log || {});
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: data.program, log: data.log }));
-          }
-        } catch (_) {}
-      }
     })();
-  }, [authChecked, user]);
+  }, []);
 
-  // ── Sync to Supabase (debounced 3s) ───────────────────────────────────────
-  const syncToCloud = useCallback((p, l) => {
-    if (!user || !navigator.onLine) return;
-    clearTimeout(syncTimeoutRef.current);
-    syncTimeoutRef.current = setTimeout(async () => {
-      setSyncing(true);
-      try { await saveToSupabase(user.id, p, l); } catch (_) {}
-      setSyncing(false);
-    }, 3000);
-  }, [user]);
-
-  // ── Persist (local + cloud) ────────────────────────────────────────────────
   const persist = useCallback((p, l) => {
     setSaving(true);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: p, log: l })); } catch (_) {}
-    setTimeout(() => setSaving(false), 400);
-    syncToCloud(p, l);
-  }, [syncToCloud]);
+    setTimeout(() => setSaving(false), 700);
+  }, []);
 
   const updateProgram = useCallback((wi, dayId, exercises) => {
     setProgram(prev => { const np = { ...prev, [wi]: { ...(prev[wi] ?? {}), [dayId]: exercises } }; persist(np, log); return np; });
   }, [log, persist]);
 
   const updateLog = useCallback((wi, dayId, exName, data) => {
-    setLog(prev => { const nl = { ...prev, [wi]: { ...(prev[wi] ?? {}), [dayId]: { ...(prev[wi]?.[dayId] ?? {}), [exName]: data } } }; persist(program, nl); return nl; });
+    setLog(prev => {
+      const nl = { ...prev, [wi]: { ...(prev[wi] ?? {}), [dayId]: { ...(prev[wi]?.[dayId] ?? {}), [exName]: data } } };
+      persist(program, nl); return nl;
+    });
   }, [program, persist]);
 
   const applyAIUpdate = useCallback((changes) => {
-    setProgram(prev => { let np = { ...prev }; changes.forEach(({ week, day, exercises }) => { np = { ...np, [week]: { ...(np[week] ?? {}), [day]: exercises } }; }); persist(np, log); return np; });
+    setProgram(prev => {
+      let np = { ...prev };
+      changes.forEach(({ week, day, exercises }) => { np = { ...np, [week]: { ...(np[week] ?? {}), [day]: exercises } }; });
+      persist(np, log); return np;
+    });
   }, [log, persist]);
 
   const allPRs = {};
-  Object.entries(log).forEach(([wi, days]) => Object.entries(days).forEach(([dayId, exs]) => Object.entries(exs).forEach(([name, data]) => {
-    const weights = (data.sets ?? []).map(s => +s.weight).filter(Boolean);
-    if (weights.length) allPRs[`${wi}_${dayId}_${name}`] = Math.max(...weights);
-  })));
-
-  const weekHasData = (wi) => DAYS.some(d => (program[wi]?.[d.id] ?? []).some(ex => (log[wi]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps)));
-
-  // ── Not authed yet ─────────────────────────────────────────────────────────
-  if (!authChecked) return (
-    <div style={{ background: C.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ color: C.accent, letterSpacing: 3, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }}>LOADING...</div>
-    </div>
+  Object.entries(log).forEach(([wi, days]) =>
+    Object.entries(days).forEach(([dayId, exs]) =>
+      Object.entries(exs).forEach(([name, data]) => {
+        const weights = (data.sets ?? []).map(s => +s.weight).filter(Boolean);
+        if (weights.length) allPRs[`${wi}_${dayId}_${name}`] = Math.max(...weights);
+      })
+    )
   );
 
-  if (!user) return <AuthScreen />;
+  const weekHasData = (wi) => DAYS.some(d =>
+    (program[wi]?.[d.id] ?? []).some(ex => (log[wi]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps))
+  );
+
+  const handleOnboardingComplete = useCallback((generatedProgram, answers) => {
+    setProgram(generatedProgram);
+    setLog({});
+    setShowOnboarding(false);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: generatedProgram, log: {} }));
+    } catch (_) {}
+  }, []);
 
   if (!loaded) return (
     <div style={{ background: C.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ color: C.accent, letterSpacing: 3, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }}>LOADING...</div>
     </div>
   );
+
+  if (showOnboarding) return <OnboardingWizard onComplete={handleOnboardingComplete} />;
 
   return (
     <div style={{ background: C.bg, minHeight: "100vh", color: C.text }}>
@@ -1025,22 +1666,25 @@ export default function App() {
       `}</style>
 
       {/* Top bar */}
-      <div style={{ position: "sticky", top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.border}`, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{
+        position: "sticky", top: 0, zIndex: 20, background: C.bg,
+        borderBottom: `1px solid ${C.border}`, padding: "12px 20px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+      }}>
         <div>
           <div style={{ ...serif, fontSize: 18, letterSpacing: 0.3 }}>Performance & Longevity</div>
           <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, marginTop: 1, ...mono }}>TRAINING TRACKER · 12-WEEK CYCLE</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {offline && <span style={{ fontSize: 9, color: C.accent, letterSpacing: 1, ...mono }}>OFFLINE</span>}
-          {syncing && <span style={{ fontSize: 9, color: C.blue, letterSpacing: 1, animation: "pulse 1s infinite", ...mono }}>SYNCING</span>}
-          {saving && !syncing && <span style={{ fontSize: 9, color: C.accent, letterSpacing: 1, animation: "pulse 1s infinite", ...mono }}>SAVING</span>}
-          <button onClick={() => supabase.auth.signOut()} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 4, color: C.muted, padding: "4px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, ...mono }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = C.red} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
-            SIGN OUT
-          </button>
+          {saving && <span style={{ fontSize: 9, color: C.accent, letterSpacing: 1, animation: "pulse 1s infinite", ...mono }}>SAVING</span>}
           <div style={{ display: "flex", border: `1px solid ${C.border}`, borderRadius: 5, overflow: "hidden" }}>
             {[["log","LOG"],["progress","PROGRESS"],["ai","AI UPDATE"]].map(([t, label]) => (
-              <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.accent : "none", border: "none", color: tab === t ? "#000" : C.muted, padding: "6px 12px", cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1, transition: "all .15s", ...mono }}>{label}</button>
+              <button key={t} onClick={() => setTab(t)} style={{
+                background: tab === t ? C.accent : "none", border: "none",
+                color: tab === t ? "#000" : C.muted, padding: "6px 12px",
+                cursor: "pointer", fontSize: 9, fontWeight: 700, letterSpacing: 1,
+                transition: "all .15s", ...mono,
+              }}>{label}</button>
             ))}
           </div>
         </div>
@@ -1049,25 +1693,51 @@ export default function App() {
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "20px 16px" }}>
         {tab === "log" && (
           <>
+            {/* Week selector */}
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
               {Array.from({ length: 12 }, (_, i) => (
-                <button key={i} onClick={() => setWeekIdx(i)} style={{ background: weekIdx === i ? C.accent : weekHasData(i) ? "#181818" : "none", border: `1px solid ${weekIdx === i ? C.accent : weekHasData(i) ? "#333" : C.border}`, borderRadius: 4, color: weekIdx === i ? "#000" : weekHasData(i) ? C.text : C.muted, padding: "5px 11px", cursor: "pointer", fontSize: 10, fontWeight: weekIdx === i ? 700 : 400, transition: "all .15s", ...mono }}>
-                  W{i + 1}{weekHasData(i) && weekIdx !== i && <span style={{ marginLeft: 3, color: C.accent, fontSize: 7 }}>●</span>}
+                <button key={i} onClick={() => setWeekIdx(i)} style={{
+                  background: weekIdx === i ? C.accent : weekHasData(i) ? "#181818" : "none",
+                  border: `1px solid ${weekIdx === i ? C.accent : weekHasData(i) ? "#333" : C.border}`,
+                  borderRadius: 4, color: weekIdx === i ? "#000" : weekHasData(i) ? C.text : C.muted,
+                  padding: "5px 11px", cursor: "pointer", fontSize: 10,
+                  fontWeight: weekIdx === i ? 700 : 400, transition: "all .15s", ...mono,
+                }}>
+                  W{i + 1}
+                  {weekHasData(i) && weekIdx !== i && <span style={{ marginLeft: 3, color: C.accent, fontSize: 7 }}>●</span>}
                 </button>
               ))}
             </div>
+
+            {/* Day selector */}
             <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
               {DAYS.map((d, i) => {
-                const hasLog = (program[weekIdx]?.[d.id] ?? []).some(ex => (log[weekIdx]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps));
+                const hasLog = (program[weekIdx]?.[d.id] ?? []).some(ex =>
+                  (log[weekIdx]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps)
+                );
                 return (
-                  <button key={d.id} onClick={() => setDayIdx(i)} style={{ background: dayIdx === i ? (hasLog ? C.green : C.accent) : "none", border: `1px solid ${dayIdx === i ? (hasLog ? C.green : C.accent) : C.border}`, borderRadius: 4, color: dayIdx === i ? "#000" : C.muted, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontWeight: dayIdx === i ? 700 : 400, transition: "all .15s", ...mono }}>
-                    {d.label.slice(0, 3).toUpperCase()}{hasLog && <span style={{ marginLeft: 4, fontSize: 8 }}>✓</span>}
+                  <button key={d.id} onClick={() => setDayIdx(i)} style={{
+                    background: dayIdx === i ? (hasLog ? C.green : C.accent) : "none",
+                    border: `1px solid ${dayIdx === i ? (hasLog ? C.green : C.accent) : C.border}`,
+                    borderRadius: 4, color: dayIdx === i ? "#000" : C.muted,
+                    padding: "5px 12px", cursor: "pointer", fontSize: 11,
+                    fontWeight: dayIdx === i ? 700 : 400, transition: "all .15s", ...mono,
+                  }}>
+                    {d.label.slice(0, 3).toUpperCase()}
+                    {hasLog && <span style={{ marginLeft: 4, fontSize: 8 }}>✓</span>}
                   </button>
                 );
               })}
             </div>
+
             <ReadinessBanner />
-            <DayPanel day={DAYS[dayIdx]} weekIdx={weekIdx} program={program} log={log} onUpdateProgram={updateProgram} onUpdateLog={updateLog} allPRs={allPRs} />
+
+            <DayPanel
+              day={DAYS[dayIdx]} weekIdx={weekIdx}
+              program={program} log={log}
+              onUpdateProgram={updateProgram} onUpdateLog={updateLog}
+              allPRs={allPRs}
+            />
           </>
         )}
         {tab === "progress" && <ProgressTab program={program} log={log} />}
