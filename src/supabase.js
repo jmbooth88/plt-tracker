@@ -11,7 +11,7 @@ export async function loadFromSupabase(userId) {
     .from("workout_data")
     .select("program, log")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
   if (error && error.code !== "PGRST116") throw error; // PGRST116 = no rows
   return data ?? null;
 }
