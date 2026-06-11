@@ -9,18 +9,18 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 export async function loadFromSupabase(userId) {
   const { data, error } = await supabase
     .from("workout_data")
-    .select("program, log")
+    .select("program, log, days")
     .eq("user_id", userId)
     .maybeSingle();
-  if (error && error.code !== "PGRST116") throw error; // PGRST116 = no rows
+  if (error) throw error;
   return data ?? null;
 }
 
 // ── Save user's workout data to Supabase ───────────────────────────────────
-export async function saveToSupabase(userId, program, log) {
+export async function saveToSupabase(userId, program, log, days) {
   const { error } = await supabase
     .from("workout_data")
-    .upsert({ user_id: userId, program, log, updated_at: new Date().toISOString() },
+    .upsert({ user_id: userId, program, log, days, updated_at: new Date().toISOString() },
       { onConflict: "user_id" });
   if (error) throw error;
 }

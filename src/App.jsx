@@ -1534,10 +1534,10 @@ export default function App() {
     clearTimeout(syncTimeoutRef.current);
     syncTimeoutRef.current = setTimeout(async () => {
       setSyncing(true);
-      try { await saveToSupabase(user.id, p, l); } catch (_) {}
+      try { await saveToSupabase(user.id, p, l, days); } catch (_) {}
       setSyncing(false);
     }, 3000);
-  }, [user]);
+  }, [user, days]);
 
   // ── Persist (local + cloud) ────────────────────────────────────────────────
   const persist = useCallback((p, l) => {
@@ -1574,7 +1574,7 @@ export default function App() {
     setShowOnboarding(false);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: generatedProgram, log: {}, days: generatedDays })); } catch (_) {}
     if (user && navigator.onLine) {
-      saveToSupabase(user.id, generatedProgram, {}).catch(() => {});
+      saveToSupabase(user.id, generatedProgram, {}, generatedDays).catch(() => {});
     }
   }, [user]);
 
