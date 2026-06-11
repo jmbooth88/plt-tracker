@@ -1184,92 +1184,406 @@ Never change log data. No text outside JSON. If request conflicts with shoulder 
 }
 
 // ─── Program Builder ─────────────────────────────────────────────────────────
-function buildProgram(answers) {
-  const { shoulderStatus, thuEnv, dlPR, bodyweight, primaryGoal, layoffWeeks } = answers;
 
-  // Base template deep clone
-  const prog = JSON.parse(JSON.stringify(WEEK1_TEMPLATE));
+// Day configurations by split type and count
+function buildDays(split, dayCount, environment) {
+  const hasOutdoor = environment === "outdoor" || environment === "mix";
+  const hasGym = environment === "gym" || environment === "mix";
 
-  // ── Trap Bar DL: inject PR if provided ──
-  const dl = prog.mon.find(e => e.name === "Trap Bar Deadlift");
-  if (dl && dlPR) dl.pr = +dlPR;
-
-  // ── Volume modifier for long layoffs ──
-  if (layoffWeeks >= 8) {
-    prog.mon.forEach(e => { if (e.sets > 2) e.sets = Math.max(2, e.sets - 1); });
-    prog.tue.forEach(e => { if (e.sets > 2) e.sets = Math.max(2, e.sets - 1); });
-    prog.sat.forEach(e => { if (e.sets > 2) e.sets = Math.max(2, e.sets - 1); });
+  if (split === "upper_lower") {
+    const maps = {
+      3: [
+        { id: "mon", label: "Monday",    focus: "Lower — Strength",     env: hasGym ? "Gym" : "Outdoor" },
+        { id: "wed", label: "Wednesday", focus: "Upper — Push + Pull",  env: "Gym" },
+        { id: "fri", label: "Friday",    focus: "Lower — Stamina",      env: hasOutdoor ? "Outdoor" : "Gym" },
+      ],
+      4: [
+        { id: "mon", label: "Monday",    focus: "Lower — Strength",        env: "Gym" },
+        { id: "tue", label: "Tuesday",   focus: "Upper — Pull + Rehab",    env: "Gym" },
+        { id: "thu", label: "Thursday",  focus: "Lower — Stamina / Carry", env: hasOutdoor ? "Outdoor" : "Gym" },
+        { id: "sat", label: "Saturday",  focus: "Upper — Push + Pull",     env: "Gym" },
+      ],
+      5: [
+        { id: "mon", label: "Monday",    focus: "Lower — Strength",     env: "Gym" },
+        { id: "tue", label: "Tuesday",   focus: "Upper — Pull",         env: "Gym" },
+        { id: "wed", label: "Wednesday", focus: "Conditioning / Carry", env: hasOutdoor ? "Outdoor" : "Gym" },
+        { id: "fri", label: "Friday",    focus: "Lower — Volume",       env: "Gym" },
+        { id: "sat", label: "Saturday",  focus: "Upper — Push",         env: "Gym" },
+      ],
+    };
+    return maps[Math.min(dayCount, 5)] || maps[4];
   }
 
-  // ── Shoulder: modify Saturday pressing ──
-  if (shoulderStatus === "pain") {
-    // Replace all pressing with band/push-up only
-    prog.sat = prog.sat.map(e => {
-      if (e.category === "push") return { ...e, name: "Push-Up", sets: 3, reps: "10–15", rpe: 6, note: "Pain-free range only. Stop at any shoulder discomfort.", pr: null };
-      return e;
-    });
-    // Remove neutral-grip DB press (duplicate push after swap)
-    const seen = new Set();
-    prog.sat = prog.sat.filter(e => { if (e.category === "push" && seen.has("push")) return false; seen.add(e.category); return true; });
-  } else if (shoulderStatus === "cautious") {
-    // Keep landmine, remove neutral-grip DB press
-    prog.sat = prog.sat.filter(e => e.name !== "Neutral-Grip DB Press");
+  if (split === "ppl") {
+    const maps = {
+      3: [
+        { id: "mon", label: "Monday",    focus: "Push",  env: "Gym" },
+        { id: "wed", label: "Wednesday", focus: "Pull",  env: "Gym" },
+        { id: "fri", label: "Friday",    focus: "Legs",  env: "Gym" },
+      ],
+      4: [
+        { id: "mon", label: "Monday",    focus: "Push",       env: "Gym" },
+        { id: "tue", label: "Tuesday",   focus: "Pull",       env: "Gym" },
+        { id: "thu", label: "Thursday",  focus: "Legs",       env: hasOutdoor ? "Outdoor" : "Gym" },
+        { id: "sat", label: "Saturday",  focus: "Push + Pull", env: "Gym" },
+      ],
+      6: [
+        { id: "mon", label: "Monday",    focus: "Push",  env: "Gym" },
+        { id: "tue", label: "Tuesday",   focus: "Pull",  env: "Gym" },
+        { id: "wed", label: "Wednesday", focus: "Legs",  env: "Gym" },
+        { id: "thu", label: "Thursday",  focus: "Push",  env: "Gym" },
+        { id: "fri", label: "Friday",    focus: "Pull",  env: "Gym" },
+        { id: "sat", label: "Saturday",  focus: "Legs",  env: hasOutdoor ? "Outdoor" : "Gym" },
+      ],
+    };
+    return maps[dayCount] || maps[3];
   }
-  // "healed" = keep template as-is
 
-  // ── Thursday: gym option B if no outdoor access ──
-  if (thuEnv === "gym") {
-    prog.thu = [
-      { name: "High Bar Back Squat",     sets: 4, reps: "5",    rpe: 7,   note: "High bar, upright torso. Depth where pelvis stays neutral.", category: "squat" },
-      { name: "Walking Lunge",           sets: 3, reps: "12",   rpe: 7,   note: "Per leg. Controlled step. Knee tracks over toe.",            category: "squat" },
-      { name: "Trap Bar Farmer's Carry", sets: 4, reps: "40yd", rpe: null,note: "Heavy. Grip, posture, pace. Rest 2 min.",                    category: "carry" },
-      { name: "Step-Up",                 sets: 3, reps: "10",   rpe: 7,   note: "Per leg. Drive through heel. Hip crease at 90° on box.",     category: "squat" },
+  if (split === "fullbody") {
+    const maps = {
+      3: [
+        { id: "mon", label: "Monday",    focus: "Full Body — Strength",    env: "Gym" },
+        { id: "wed", label: "Wednesday", focus: "Full Body — Hypertrophy", env: "Gym" },
+        { id: "fri", label: "Friday",    focus: "Full Body — Stamina",     env: hasOutdoor ? "Outdoor" : "Gym" },
+      ],
+      4: [
+        { id: "mon", label: "Monday",    focus: "Full Body A",    env: "Gym" },
+        { id: "wed", label: "Wednesday", focus: "Full Body B",    env: "Gym" },
+        { id: "fri", label: "Friday",    focus: "Full Body A",    env: "Gym" },
+        { id: "sat", label: "Saturday",  focus: "Conditioning",   env: hasOutdoor ? "Outdoor" : "Gym" },
+      ],
+    };
+    return maps[Math.min(dayCount, 4)] || maps[3];
+  }
+
+  if (split === "conventional") {
+    return [
+      { id: "mon", label: "Monday",    focus: "Chest + Triceps",     env: "Gym" },
+      { id: "tue", label: "Tuesday",   focus: "Back + Biceps",       env: "Gym" },
+      { id: "thu", label: "Thursday",  focus: "Legs",                env: hasOutdoor ? "Outdoor" : "Gym" },
+      { id: "sat", label: "Saturday",  focus: "Shoulders + Arms",    env: "Gym" },
     ];
   }
 
-  // ── Primary goal modifier ──
-  if (primaryGoal === "stamina") {
-    // Increase carry volume on Thursday
-    const carry = prog.thu.find(e => e.category === "carry");
-    if (carry) carry.sets = Math.min(carry.sets + 1, 5);
-  } else if (primaryGoal === "strength") {
-    // Bump DL sets
-    if (dl) dl.sets = Math.min(dl.sets + 1, 5);
+  // Default fallback
+  return [
+    { id: "mon", label: "Monday",   focus: "Lower — Strength",        env: "Gym" },
+    { id: "tue", label: "Tuesday",  focus: "Upper — Pull + Rehab",    env: "Gym" },
+    { id: "thu", label: "Thursday", focus: "Lower — Stamina / Carry", env: hasOutdoor ? "Outdoor" : "Gym" },
+    { id: "sat", label: "Saturday", focus: "Upper — Push + Pull",     env: "Gym" },
+  ];
+}
+
+// Exercise substitution by equipment
+function subForEquipment(exercise, equipment) {
+  if (equipment === "full" || equipment === "barbell") return exercise;
+  const subs = {
+    "Back Squat":            { dumbbells: "Goblet Squat",          bodyweight: "Bodyweight Squat",   kettlebells: "Goblet Squat" },
+    "Barbell Row":           { dumbbells: "Single-Arm DB Row",     bodyweight: "Bodyweight Row",     kettlebells: "Kettlebell Clean" },
+    "Bench Press":           { dumbbells: "Incline DB Press",      bodyweight: "Push-Up",            kettlebells: "Kettlebell Press" },
+    "Trap Bar Deadlift":     { dumbbells: "Romanian Deadlift",     bodyweight: "Single-Leg RDL",     kettlebells: "Kettlebell Swing" },
+    "Conventional Deadlift": { dumbbells: "Romanian Deadlift",     bodyweight: "Single-Leg RDL",     kettlebells: "Kettlebell Swing" },
+    "Overhead Press":        { dumbbells: "DB Shoulder Press",     bodyweight: "Pike Push-Up",       kettlebells: "Kettlebell Press" },
+    "Trap Bar Farmer's Carry":{ dumbbells: "Suitcase Carry",       bodyweight: "Loaded Pack Walk",   kettlebells: "Suitcase Carry" },
+    "Lat Pulldown":          { dumbbells: "Pull-Up",               bodyweight: "Pull-Up",            kettlebells: "Pull-Up" },
+  };
+  return subs[exercise]?.[equipment] || exercise;
+}
+
+// Upper body limitation modifications
+function applyUpperLimitation(exercises, limitationType) {
+  return exercises.map(e => {
+    if (e.category !== "push") return e;
+    if (limitationType === "upper_pain") {
+      return { ...e, name: "Push-Up", sets: Math.min(e.sets, 3), reps: "10–15", rpe: 6, note: "Pain-free range only. Stop at any discomfort. No overhead loading.", pr: null };
+    }
+    if (limitationType === "upper_cautious") {
+      if (e.name === "Neutral-Grip DB Press" || e.name === "Bench Press") return null;
+      if (e.name === "DB Shoulder Press") return { ...e, name: "Landmine Press", note: "Shoulder-friendly arc. Conservative load." };
+      return e;
+    }
+    return e;
+  }).filter(Boolean);
+}
+
+// Lower body limitation modifications
+function applyLowerLimitation(exercises, limitationType) {
+  return exercises.map(e => {
+    if (limitationType === "lower_pain") {
+      if (e.category === "squat") return { ...e, name: "Seated Leg Press", sets: Math.min(e.sets, 3), rpe: 6, note: "Pain-free range only. No deep flexion if uncomfortable." };
+      if (e.category === "hinge" && (e.name.includes("Deadlift") || e.name === "Trap Bar Deadlift")) {
+        return { ...e, name: "Glute Bridge", sets: Math.min(e.sets, 3), reps: "15", rpe: 6, note: "Hinge pattern without spinal load. Build from here.", pr: null };
+      }
+    }
+    if (limitationType === "lower_cautious") {
+      if (e.name === "Bulgarian Split Squat") return { ...e, name: "Step-Up", note: "Controlled. Drive through heel. Sub for split squat while rehabbing." };
+      if (e.rpe && e.rpe >= 8 && e.category === "hinge") return { ...e, rpe: 7, sets: Math.max(e.sets - 1, 2), note: (e.note || "") + " Reduced intensity — lower body caution." };
+    }
+    return e;
+  }).filter(Boolean);
+}
+
+function buildProgram(answers) {
+  const { split, dayCount, environment, equipment, limitation, primaryGoal, layoffWeeks, dlPR } = answers;
+
+  const days = buildDays(split, dayCount, environment);
+  const hasOutdoor = environment === "outdoor" || environment === "mix";
+  const hasBarbell = equipment === "full" || equipment === "barbell";
+
+  // ── Build day programs based on split ──
+  const prog = {};
+
+  // Helper: reduce volume if long layoff
+  const volMod = (sets) => layoffWeeks >= 8 ? Math.max(2, sets - 1) : sets;
+
+  // ── UPPER/LOWER split (default) ──
+  if (split === "upper_lower") {
+    // Lower Strength day
+    const lowerStrength = [
+      { name: hasBarbell ? "Trap Bar Deadlift" : "Romanian Deadlift", sets: volMod(4), reps: "4–5", rpe: 8, note: "Neutral spine. Reset between reps.", category: "hinge", pr: dlPR ? +dlPR : undefined },
+      { name: "Goblet Squat",            sets: volMod(3), reps: "8",    rpe: 7, note: "Pause 1s at bottom.", category: "squat" },
+      { name: "Romanian Deadlift",       sets: volMod(3), reps: "10",   rpe: 7, note: "3s eccentric. Hinge from hip.", category: "hinge" },
+      { name: hasBarbell ? "Trap Bar Farmer's Carry" : "Suitcase Carry", sets: 3, reps: "40yd", rpe: null, note: "Tall posture. 90s rest.", category: "carry" },
+      { name: "Copenhagen Plank",        sets: 2, reps: "25s", rpe: null, note: "Per side.", category: "core" },
+      { name: "Dead Bug",                sets: 2, reps: "8",   rpe: null, note: "Per side. Lumbar on floor.", category: "core" },
+    ];
+
+    // Upper Pull day
+    const upperPull = [
+      { name: "Chest-Supported DB Row",  sets: volMod(4), reps: "10–12", rpe: 7, note: "Scapular retraction at top.", category: "pull" },
+      { name: equipment === "bodyweight" ? "Pull-Up" : "Neutral-Grip Pull-Up", sets: volMod(3), reps: "8–10", rpe: 7, note: "Full hang at bottom.", category: "pull" },
+      { name: "Face Pull",               sets: volMod(3), reps: "15",    rpe: 6, note: "External rotation at end range.", category: "rehab" },
+      { name: "Single-Arm DB Row",       sets: volMod(3), reps: "10",    rpe: 7, note: "Per side.", category: "pull" },
+      { name: "Band External Rotation",  sets: 2, reps: "15–20", rpe: null, note: "Per side. Motor re-patterning.", category: "rehab" },
+      { name: "Bicep Curl",              sets: 2, reps: "12",   rpe: 6, note: "Neutral or supinated grip.", category: "accessory" },
+    ];
+
+    // Lower Stamina day
+    const lowerStamina = hasOutdoor ? [
+      { name: "Weighted Ruck",         sets: 1, reps: "35min", rpe: null, note: "30–40 lbs. Nasal breathing only.", category: "cardio" },
+      { name: "Bulgarian Split Squat", sets: volMod(3), reps: "8",  rpe: 7, note: "Per leg. Post-ruck.", category: "squat" },
+      { name: equipment === "kettlebells" || equipment === "bodyweight" ? "Kettlebell Swing" : "Kettlebell Swing", sets: volMod(4), reps: "15", rpe: 7, note: "Hip drive, not squat.", category: "hinge" },
+    ] : [
+      { name: hasBarbell ? "High Bar Back Squat" : "Goblet Squat", sets: volMod(4), reps: "5", rpe: 7, note: "Upright torso. Depth where pelvis stays neutral.", category: "squat" },
+      { name: "Walking Lunge",         sets: volMod(3), reps: "12", rpe: 7, note: "Per leg. Controlled.", category: "squat" },
+      { name: hasBarbell ? "Trap Bar Farmer's Carry" : "Suitcase Carry", sets: 4, reps: "40yd", rpe: null, note: "Heavy. Grip, posture, pace.", category: "carry" },
+      { name: "Step-Up",               sets: volMod(3), reps: "10", rpe: 7, note: "Per leg. Drive through heel.", category: "squat" },
+    ];
+
+    // Upper Push day
+    const upperPush = (() => {
+      const pressExercise = equipment === "bodyweight"
+        ? { name: "Push-Up", sets: volMod(4), reps: "15–20", rpe: 7, note: "Controlled eccentric. Chest to floor.", category: "push" }
+        : { name: "Landmine Press", sets: volMod(4), reps: "10", rpe: 7, note: "Shoulder-friendly arc. Control descent.", category: "push" };
+      return [
+        pressExercise,
+        { name: "Chest-Supported DB Row", sets: volMod(3), reps: "12", rpe: 7, note: "Balance press volume.", category: "pull" },
+        ...(equipment !== "bodyweight" ? [{ name: "Neutral-Grip DB Press", sets: volMod(2), reps: "12", rpe: 6, note: "Neutral grip only.", category: "push" }] : []),
+        { name: "Band Pull-Apart",        sets: 3, reps: "20",  rpe: null, note: "Every press session.", category: "rehab" },
+        { name: "Tricep Overhead Ext.",   sets: 2, reps: "15",  rpe: 6, note: "Long head. Controlled eccentric.", category: "accessory" },
+        { name: "Hammer Curl",            sets: 2, reps: "12",  rpe: 6, note: "Brachialis focus.", category: "accessory" },
+        { name: "Face Pull",              sets: 2, reps: "15",  rpe: 6, note: "Shoulder insurance.", category: "rehab" },
+      ];
+    })();
+
+    // Assign to days
+    const dayPrograms = [lowerStrength, upperPull, lowerStamina, upperPush];
+    days.forEach((d, i) => { prog[d.id] = dayPrograms[i % dayPrograms.length]; });
+
+    // 5-day: add a volume lower and a push day
+    if (dayCount >= 5 && days[4]) {
+      prog[days[4].id] = upperPush.map(e => ({ ...e, sets: Math.max(2, e.sets - 1) }));
+    }
   }
 
-  return { 0: prog };
+  // ── PUSH / PULL / LEGS ──
+  else if (split === "ppl") {
+    const push = [
+      { name: equipment === "bodyweight" ? "Push-Up" : (hasBarbell ? "Bench Press" : "Incline DB Press"), sets: volMod(4), reps: hasBarbell ? "5" : "10", rpe: 8, note: hasBarbell ? "Controlled descent. Full range." : "Controlled eccentric. Chest stretch at bottom.", category: "push" },
+      { name: "Landmine Press",          sets: volMod(3), reps: "10", rpe: 7, note: "Shoulder-friendly. Good warmup for pressing.", category: "push" },
+      { name: equipment === "bodyweight" ? "Pike Push-Up" : "DB Shoulder Press", sets: volMod(3), reps: "12", rpe: 7, note: "Overhead strength. Control descent.", category: "push" },
+      { name: "Lateral Raise",           sets: 3, reps: "15", rpe: 6, note: "Light. Medial delt focus.", category: "accessory" },
+      { name: "Tricep Overhead Ext.",    sets: 3, reps: "15", rpe: 6, note: "Long head stretch.", category: "accessory" },
+      { name: "Band Pull-Apart",         sets: 3, reps: "20", rpe: null, note: "Every press session.", category: "rehab" },
+    ];
+
+    const pull = [
+      { name: equipment === "bodyweight" ? "Pull-Up" : "Neutral-Grip Pull-Up", sets: volMod(4), reps: "8–10", rpe: 7, note: "Full hang. Scapular depression at top.", category: "pull" },
+      { name: "Chest-Supported DB Row",  sets: volMod(4), reps: "10–12", rpe: 7, note: "Retract scapula. Pause at top.", category: "pull" },
+      { name: "Single-Arm DB Row",       sets: volMod(3), reps: "10",    rpe: 7, note: "Per side. Full stretch at bottom.", category: "pull" },
+      { name: "Face Pull",               sets: 3, reps: "15", rpe: 6, note: "External rotation. High pull.", category: "rehab" },
+      { name: "Bicep Curl",              sets: 3, reps: "12", rpe: 6, note: "Full supination at top.", category: "accessory" },
+      { name: "Hammer Curl",             sets: 2, reps: "12", rpe: 6, note: "Brachialis focus.", category: "accessory" },
+    ];
+
+    const legs = [
+      { name: hasBarbell ? "Back Squat" : "Goblet Squat", sets: volMod(4), reps: hasBarbell ? "5" : "8", rpe: 8, note: hasBarbell ? "High bar. Depth where pelvis stays neutral." : "Pause 1s at bottom. Upright torso.", category: "squat", pr: undefined },
+      { name: hasBarbell ? "Romanian Deadlift" : "Single-Leg RDL", sets: volMod(3), reps: "8–10", rpe: 7, note: "3s eccentric. Hip hinge pattern.", category: "hinge" },
+      { name: "Bulgarian Split Squat",   sets: volMod(3), reps: "8",   rpe: 7, note: "Per leg. Rear foot elevated.", category: "squat" },
+      { name: hasOutdoor ? "Weighted Ruck" : (hasBarbell ? "Trap Bar Farmer's Carry" : "Suitcase Carry"), sets: hasOutdoor ? 1 : 3, reps: hasOutdoor ? "30min" : "40yd", rpe: null, note: hasOutdoor ? "Nasal breathing." : "Tall posture. Heavy.", category: hasOutdoor ? "cardio" : "carry" },
+      { name: "Dead Bug",                sets: 2, reps: "8", rpe: null, note: "Per side. Lumbar on floor.", category: "core" },
+    ];
+
+    days.forEach((d, i) => {
+      const cycle = [push, pull, legs];
+      prog[d.id] = cycle[i % 3];
+    });
+  }
+
+  // ── FULL BODY ──
+  else if (split === "fullbody") {
+    const fbA = [
+      { name: hasBarbell ? "Trap Bar Deadlift" : "Romanian Deadlift", sets: volMod(4), reps: "5", rpe: 8, note: "Primary hinge. Reset between reps.", category: "hinge", pr: dlPR ? +dlPR : undefined },
+      { name: equipment === "bodyweight" ? "Push-Up" : "Landmine Press", sets: volMod(3), reps: "10", rpe: 7, note: "Horizontal push.", category: "push" },
+      { name: equipment === "bodyweight" ? "Pull-Up" : "Chest-Supported DB Row", sets: volMod(3), reps: "10", rpe: 7, note: "Horizontal pull.", category: "pull" },
+      { name: "Goblet Squat",            sets: volMod(3), reps: "8", rpe: 7, note: "Pause at bottom.", category: "squat" },
+      { name: "Dead Bug",                sets: 2, reps: "8", rpe: null, note: "Core stability.", category: "core" },
+    ];
+
+    const fbB = [
+      { name: hasBarbell ? "Back Squat" : "Bulgarian Split Squat", sets: volMod(4), reps: hasBarbell ? "5" : "8", rpe: 8, note: "Primary squat.", category: "squat" },
+      { name: equipment === "bodyweight" ? "Pike Push-Up" : "DB Shoulder Press", sets: volMod(3), reps: "10", rpe: 7, note: "Vertical push.", category: "push" },
+      { name: "Neutral-Grip Pull-Up",    sets: volMod(3), reps: "8–10", rpe: 7, note: "Vertical pull.", category: "pull" },
+      { name: hasBarbell ? "Romanian Deadlift" : "Kettlebell Swing", sets: volMod(3), reps: "10", rpe: 7, note: "Hip hinge.", category: "hinge" },
+      { name: "Copenhagen Plank",        sets: 2, reps: "25s", rpe: null, note: "Per side.", category: "core" },
+    ];
+
+    const conditioning = hasOutdoor ? [
+      { name: "Weighted Ruck",         sets: 1, reps: "35min", rpe: null, note: "30–40 lbs. Nasal breathing.", category: "cardio" },
+      { name: "Kettlebell Swing",       sets: 4, reps: "15",   rpe: 7, note: "Hip drive.", category: "hinge" },
+      { name: "Walking Lunge",          sets: 3, reps: "12",   rpe: 7, note: "Per leg.", category: "squat" },
+    ] : [
+      { name: hasBarbell ? "Trap Bar Farmer's Carry" : "Suitcase Carry", sets: 4, reps: "40yd", rpe: null, note: "Heavy. Grip and posture.", category: "carry" },
+      { name: "Kettlebell Swing",       sets: 4, reps: "15",   rpe: 7, note: "Hip drive.", category: "hinge" },
+      { name: "Step-Up",                sets: 3, reps: "10",   rpe: 7, note: "Per leg.", category: "squat" },
+    ];
+
+    days.forEach((d, i) => {
+      const cycle = [fbA, fbB, conditioning, fbA];
+      prog[d.id] = cycle[i % cycle.length];
+    });
+  }
+
+  // ── CONVENTIONAL (bro split) ──
+  else if (split === "conventional") {
+    const chest = [
+      { name: hasBarbell ? "Bench Press" : "Incline DB Press", sets: volMod(4), reps: hasBarbell ? "5" : "10", rpe: 8, note: "Primary chest movement.", category: "push" },
+      { name: "Incline DB Press",        sets: volMod(3), reps: "12", rpe: 7, note: "Stretch at bottom.", category: "push" },
+      { name: equipment === "bodyweight" ? "Push-Up" : "DB Fly", sets: volMod(3), reps: "15", rpe: 6, note: "Isolation. Full stretch.", category: "push" },
+      { name: "Band Pull-Apart",         sets: 3, reps: "20", rpe: null, note: "Shoulder health.", category: "rehab" },
+      { name: "Tricep Pushdown",         sets: 3, reps: "15", rpe: 6, note: "Lockout at bottom.", category: "accessory" },
+      { name: "Tricep Overhead Ext.",    sets: 3, reps: "15", rpe: 6, note: "Long head stretch.", category: "accessory" },
+    ];
+
+    const back = [
+      { name: equipment === "bodyweight" ? "Pull-Up" : "Neutral-Grip Pull-Up", sets: volMod(4), reps: "8–10", rpe: 7, note: "Full hang.", category: "pull" },
+      { name: "Chest-Supported DB Row",  sets: volMod(4), reps: "10–12", rpe: 7, note: "Retract scapula.", category: "pull" },
+      { name: hasBarbell ? "Barbell Row" : "Single-Arm DB Row", sets: volMod(3), reps: "10", rpe: 7, note: "Full range.", category: "pull" },
+      { name: "Face Pull",               sets: 3, reps: "15", rpe: 6, note: "External rotation.", category: "rehab" },
+      { name: "Bicep Curl",              sets: 3, reps: "12", rpe: 6, note: "Full supination.", category: "accessory" },
+      { name: "Hammer Curl",             sets: 3, reps: "12", rpe: 6, note: "Brachialis.", category: "accessory" },
+    ];
+
+    const legs = [
+      { name: hasBarbell ? "Back Squat" : "Goblet Squat", sets: volMod(4), reps: hasBarbell ? "5" : "8", rpe: 8, note: "Primary squat.", category: "squat", pr: undefined },
+      { name: hasBarbell ? "Romanian Deadlift" : "Single-Leg RDL", sets: volMod(3), reps: "8–10", rpe: 7, note: "Hip hinge.", category: "hinge" },
+      { name: "Bulgarian Split Squat",   sets: volMod(3), reps: "8", rpe: 7, note: "Per leg.", category: "squat" },
+      { name: hasOutdoor ? "Weighted Ruck" : (hasBarbell ? "Trap Bar Farmer's Carry" : "Suitcase Carry"), sets: hasOutdoor ? 1 : 3, reps: hasOutdoor ? "30min" : "40yd", rpe: null, note: hasOutdoor ? "Nasal breathing." : "Grip and posture.", category: hasOutdoor ? "cardio" : "carry" },
+      { name: "Nordic Curl",             sets: 2, reps: "5", rpe: 8, note: "Eccentric only if needed. Hamstring strength.", category: "accessory" },
+    ];
+
+    const shoulders = [
+      { name: equipment === "bodyweight" ? "Pike Push-Up" : "DB Shoulder Press", sets: volMod(4), reps: "10", rpe: 7, note: "Vertical press.", category: "push" },
+      { name: "Landmine Press",          sets: volMod(3), reps: "12", rpe: 7, note: "Shoulder-friendly arc.", category: "push" },
+      { name: "Lateral Raise",           sets: 4, reps: "15", rpe: 6, note: "Light. Medial delt.", category: "accessory" },
+      { name: "Face Pull",               sets: 3, reps: "15", rpe: 6, note: "Rear delt and cuff.", category: "rehab" },
+      { name: "Bicep Curl",              sets: 3, reps: "12", rpe: 6, note: "Supinating curl.", category: "accessory" },
+      { name: "Tricep Pushdown",         sets: 3, reps: "15", rpe: 6, note: "Cable or band.", category: "accessory" },
+    ];
+
+    const dayMap = [chest, back, legs, shoulders];
+    days.forEach((d, i) => { prog[d.id] = dayMap[i % dayMap.length]; });
+  }
+
+  // ── Apply limitation modifications ──
+  if (limitation === "upper_pain" || limitation === "upper_cautious") {
+    Object.keys(prog).forEach(dayId => {
+      prog[dayId] = applyUpperLimitation(prog[dayId], limitation);
+    });
+  }
+  if (limitation === "lower_pain" || limitation === "lower_cautious") {
+    Object.keys(prog).forEach(dayId => {
+      prog[dayId] = applyLowerLimitation(prog[dayId], limitation);
+    });
+  }
+  if (limitation === "both_pain") {
+    Object.keys(prog).forEach(dayId => {
+      prog[dayId] = applyUpperLimitation(applyLowerLimitation(prog[dayId], "lower_pain"), "upper_pain");
+    });
+  }
+
+  // ── Primary goal fine-tuning ──
+  if (primaryGoal === "strength") {
+    Object.keys(prog).forEach(dayId => {
+      prog[dayId] = prog[dayId].map(e =>
+        (e.category === "hinge" || e.category === "squat") && e.rpe >= 7
+          ? { ...e, sets: Math.min(e.sets + 1, 5), rpe: Math.min(e.rpe + 0.5, 9) }
+          : e
+      );
+    });
+  }
+  if (primaryGoal === "stamina") {
+    Object.keys(prog).forEach(dayId => {
+      prog[dayId] = prog[dayId].map(e =>
+        e.category === "carry" || e.category === "cardio"
+          ? { ...e, sets: Math.min((e.sets || 1) + 1, 5) }
+          : e
+      );
+    });
+  }
+  if (primaryGoal === "body") {
+    Object.keys(prog).forEach(dayId => {
+      prog[dayId] = prog[dayId].map(e =>
+        e.rpe && e.rpe < 8 ? { ...e, reps: typeof e.reps === "string" && !e.reps.includes("–") ? `${e.reps}–${+e.reps + 4}` : e.reps } : e
+      );
+    });
+  }
+
+  return { program: { 0: prog }, days };
 }
 
 // ─── Onboarding Wizard ────────────────────────────────────────────────────────
 const ONBOARDING_STEPS = [
-  "welcome", "goals", "shoulder", "layoff", "thursday", "baselines", "summary"
+  "welcome", "goals", "split", "days", "environment", "equipment", "limitation", "baselines", "summary"
 ];
 
 function OnboardingWizard({ onComplete }) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({
-    primaryGoal: "longevity",
-    shoulderStatus: "cautious",
-    layoffWeeks: 6,
-    thuEnv: "outdoor",
-    dlPR: "",
-    bodyweight: "",
     name: "",
+    primaryGoal: "longevity",
+    split: "upper_lower",
+    dayCount: 4,
+    environment: "mix",
+    equipment: "full",
+    limitation: "none",
+    layoffWeeks: 6,
+    dlPR: "",
+    squatPR: "",
+    bodyweight: "",
   });
-  const [animDir, setAnimDir] = useState("forward");
 
   const update = (key, val) => setAnswers(p => ({ ...p, [key]: val }));
-
-  const next = () => { setAnimDir("forward"); setStep(s => Math.min(s + 1, ONBOARDING_STEPS.length - 1)); };
-  const back = () => { setAnimDir("back"); setStep(s => Math.max(s - 1, 0)); };
-
-  const finish = () => {
-    const program = buildProgram(answers);
-    onComplete(program, answers);
-  };
-
   const stepName = ONBOARDING_STEPS[step];
   const isLast = step === ONBOARDING_STEPS.length - 1;
+  const totalSteps = ONBOARDING_STEPS.length - 2; // exclude welcome and summary
+
+  const next = () => setStep(s => Math.min(s + 1, ONBOARDING_STEPS.length - 1));
+  const back = () => setStep(s => Math.max(s - 1, 0));
+  const finish = () => {
+    const { program, days } = buildProgram(answers);
+    onComplete(program, days, answers);
+  };
 
   const SelectCard = ({ selected, onClick, children, color }) => (
     <div onClick={onClick} style={{
@@ -1278,10 +1592,7 @@ function OnboardingWizard({ onComplete }) {
       borderRadius: 6, padding: "12px 16px", cursor: "pointer",
       background: selected ? `${(color || C.accent)}12` : C.card,
       transition: "all .15s", marginBottom: 8,
-    }}
-      onMouseEnter={e => { if (!selected) e.currentTarget.style.borderColor = C.borderHover; }}
-      onMouseLeave={e => { if (!selected) e.currentTarget.style.borderColor = C.border; }}
-    >
+    }}>
       {children}
     </div>
   );
@@ -1294,14 +1605,14 @@ function OnboardingWizard({ onComplete }) {
           <div style={{ fontSize: 11, color: C.accent, letterSpacing: 3, marginBottom: 12, ...mono }}>PERFORMANCE & LONGEVITY</div>
           <div style={{ ...serif, fontSize: 32, color: C.text, marginBottom: 8, lineHeight: 1.2 }}>Build your program.</div>
           <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.7, marginBottom: 28 }}>
-            A few questions to generate a Week 1 training plan tailored to your current status, goals, and environment. Takes about 60 seconds.
+            A few questions to generate a Week 1 training plan built around your goals, schedule, equipment, and any current limitations. Takes about 90 seconds.
           </div>
-          <div style={{ borderTop: `1px solid ${C.faint}`, paddingTop: 20, marginBottom: 28 }}>
+          <div style={{ borderTop: `1px solid ${C.faint}`, paddingTop: 20, marginBottom: 24 }}>
             {[
-              ["Shoulder-aware pressing progression", C.accent],
-              ["Outdoor or gym Thursday options", C.blue],
-              ["Volume calibrated to your layoff length", C.green],
-              ["PR baselines loaded into your log", "#A07EC8"],
+              ["Program split tailored to your goals", C.accent],
+              ["Equipment-aware exercise selection", C.blue],
+              ["Limitation-safe modifications built in", C.green],
+              ["Indoor, outdoor, or mixed sessions", "#A07EC8"],
             ].map(([text, col]) => (
               <div key={text} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%", background: col, flexShrink: 0 }} />
@@ -1309,30 +1620,24 @@ function OnboardingWizard({ onComplete }) {
               </div>
             ))}
           </div>
-          <div style={{ marginBottom: 6 }}>
-            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>YOUR NAME (optional)</div>
-            <input value={answers.name} onChange={e => update("name", e.target.value)}
-              placeholder="First name"
-              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "10px 14px", fontSize: 14, outline: "none", width: "100%", ...mono }}
-              onFocus={e => e.target.style.borderColor = C.accent}
-              onBlur={e => e.target.style.borderColor = C.border}
-            />
-          </div>
+          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>YOUR NAME (optional)</div>
+          <input value={answers.name} onChange={e => update("name", e.target.value)} placeholder="First name"
+            style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "10px 14px", fontSize: 14, outline: "none", width: "100%", ...mono }}
+            onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border}
+          />
         </div>
       );
 
       case "goals": return (
         <div>
-          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 1 OF 5</div>
-          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>What's driving this?</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
-            Your primary goal shapes volume, intensity, and exercise selection priorities.
-          </div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 1 OF {totalSteps}</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>What's the primary driver?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>Shapes intensity, volume, and exercise priority across the 12-week cycle.</div>
           {[
-            { val: "longevity", label: "Longevity & Healthspan", desc: "Train to move well for decades. Load serves function, not ego.", color: C.green },
-            { val: "strength",  label: "Strength & Performance", desc: "Rebuild and surpass pre-layoff numbers. Volume follows load.", color: C.accent },
-            { val: "stamina",   label: "Stamina & Work Capacity", desc: "Functional endurance — far under load. Carries and ruck anchor the week.", color: C.blue },
-            { val: "body",      label: "Body Composition",        desc: "Lean and functional. Strength training as the metabolic driver.", color: "#C87E96" },
+            { val: "longevity", label: "Longevity & Healthspan",   desc: "Train to move well for decades. Load serves function.", color: C.green },
+            { val: "strength",  label: "Strength & Performance",   desc: "Build or rebuild max strength. Volume follows load.", color: C.accent },
+            { val: "stamina",   label: "Stamina & Work Capacity",  desc: "Functional endurance — far under load. Carries anchor the week.", color: C.blue },
+            { val: "body",      label: "Body Composition",         desc: "Lean and functional. Strength training as the metabolic engine.", color: "#C87E96" },
           ].map(({ val, label, desc, color }) => (
             <SelectCard key={val} selected={answers.primaryGoal === val} onClick={() => update("primaryGoal", val)} color={color}>
               <div style={{ fontSize: 13, color: answers.primaryGoal === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
@@ -1342,112 +1647,164 @@ function OnboardingWizard({ onComplete }) {
         </div>
       );
 
-      case "shoulder": return (
+      case "split": return (
         <div>
-          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 2 OF 5</div>
-          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Shoulder status?</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
-            This determines your pressing entry point. The program uses a 5-week pressing progression: Landmine → DB Floor Press → Incline DB → Flat DB → Barbell.
-          </div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 2 OF {totalSteps}</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Program structure?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>How do you want to organize your training across the week?</div>
           {[
-            { val: "pain",     label: "Still uncomfortable", desc: "Pain or restriction present. Push-up/band pressing only. Pulls and stability this week.", color: C.red },
-            { val: "cautious", label: "Pain-free but cautious", desc: "Cleared the layoff but want to be conservative. Landmine press as the entry point.", color: C.accent },
-            { val: "healed",   label: "Fully recovered",     desc: "No restrictions. Start at landmine, can progress faster through the hierarchy.", color: C.green },
-            { val: "none",     label: "No shoulder history", desc: "No layoff, no restrictions. Standard Week 1 pressing volume.", color: C.blue },
+            { val: "upper_lower", label: "Upper / Lower Split",       desc: "Alternate upper and lower body days. Best balance of frequency and recovery. Recommended for most goals.", color: C.accent },
+            { val: "ppl",         label: "Push / Pull / Legs",        desc: "Dedicated push, pull, and leg days. High volume per movement pattern. Great for hypertrophy and strength.", color: C.blue },
+            { val: "fullbody",    label: "Full Body",                  desc: "Hit all major patterns every session. Best for 3-day schedules and general fitness.", color: C.green },
+            { val: "conventional",label: "Conventional Split",         desc: "Classic chest/back/legs/shoulders approach. Familiar structure with dedicated muscle-group days.", color: "#A07EC8" },
           ].map(({ val, label, desc, color }) => (
-            <SelectCard key={val} selected={answers.shoulderStatus === val} onClick={() => update("shoulderStatus", val)} color={color}>
-              <div style={{ fontSize: 13, color: answers.shoulderStatus === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+            <SelectCard key={val} selected={answers.split === val} onClick={() => update("split", val)} color={color}>
+              <div style={{ fontSize: 13, color: answers.split === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
               <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
             </SelectCard>
           ))}
         </div>
       );
 
-      case "layoff": return (
+      case "days": return (
         <div>
-          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 3 OF 5</div>
-          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Training layoff length?</div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 3 OF {totalSteps}</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Training days per week?</div>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
-            Determines starting volume. Longer layoffs mean reduced working sets in Week 1 — volume rebuilt progressively.
+            How many days can you realistically commit to every week? Recovery is part of the program.
           </div>
           {[
-            { val: 0,  label: "No layoff",    desc: "Continuous training. No deconditioning factor." },
-            { val: 3,  label: "1–4 weeks",    desc: "Mild deconditioning. Minor volume reduction. Back to baseline by Week 3." },
-            { val: 6,  label: "4–8 weeks",    desc: "Moderate. Standard reconditioning protocol. Volume builds weekly." },
-            { val: 10, label: "8+ weeks",     desc: "Significant. Week 1 volume reduced by one working set per compound. Rebuild from the floor." },
-          ].map(({ val, label, desc }) => (
-            <SelectCard key={val} selected={answers.layoffWeeks === val} onClick={() => update("layoffWeeks", val)}>
-              <div style={{ fontSize: 13, color: answers.layoffWeeks === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+            { val: 3, label: "3 days",  desc: "Solid foundation. Full recovery between sessions. Best for beginners or high-stress weeks." },
+            { val: 4, label: "4 days",  desc: "Optimal for most people. Enough frequency and volume without outrunning recovery." },
+            { val: 5, label: "5 days",  desc: "Higher volume. Requires solid sleep and nutrition. Good for advanced trainees." },
+            { val: 6, label: "6 days",  desc: "PPL double-run or high-frequency split. Only if recovery is dialed in." },
+          ].filter(({ val }) => {
+            if (answers.split === "fullbody" && val > 4) return false;
+            if (answers.split === "conventional" && val !== 4) return false;
+            if (answers.split === "upper_lower" && val > 5) return false;
+            return true;
+          }).map(({ val, label, desc }) => (
+            <SelectCard key={val} selected={answers.dayCount === val} onClick={() => update("dayCount", val)}>
+              <div style={{ fontSize: 13, color: answers.dayCount === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
               <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
             </SelectCard>
           ))}
         </div>
       );
 
-      case "thursday": return (
+      case "environment": return (
         <div>
-          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 4 OF 5</div>
-          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Thursday environment?</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
-            Thursday is stamina day. Outdoor Option A centers on a weighted ruck followed by split squats and kettlebell swings. Gym Option B is a squat + carry session.
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 4 OF {totalSteps}</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Training environment?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>Determines whether outdoor sessions like rucks and loaded carries are built into your schedule.</div>
+          {[
+            { val: "gym",     label: "Gym only",           desc: "All sessions indoors. Carry and stamina work uses gym equipment.", color: C.blue },
+            { val: "outdoor", label: "Outdoor only",       desc: "Trail work, rucks, and carries outdoors. Minimal equipment needed.", color: C.green },
+            { val: "mix",     label: "Mix of both",        desc: "Gym for strength days, outdoor for stamina. Highest variety — recommended.", color: C.accent },
+          ].map(({ val, label, desc, color }) => (
+            <SelectCard key={val} selected={answers.environment === val} onClick={() => update("environment", val)} color={color}>
+              <div style={{ fontSize: 13, color: answers.environment === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
+            </SelectCard>
+          ))}
+        </div>
+      );
+
+      case "equipment": return (
+        <div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 5 OF {totalSteps}</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Available equipment?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>Exercise selection adapts to what you actually have access to.</div>
+          {[
+            { val: "full",       label: "Full commercial gym",    desc: "Barbells, rack, cables, machines, dumbbells — everything. No substitutions needed.", color: C.accent },
+            { val: "barbell",    label: "Barbell + rack + DBs",   desc: "Home gym setup. Full strength work, no cables or machines.", color: C.blue },
+            { val: "dumbbells",  label: "Dumbbells only",         desc: "No barbell. DB alternatives used throughout. Still highly effective.", color: C.green },
+            { val: "kettlebells",label: "Kettlebells",            desc: "KB-primary training. Swings, cleans, carries, presses.", color: "#A07EC8" },
+            { val: "bodyweight", label: "Bodyweight only",        desc: "No equipment. Push-up, pull-up, squat, and carry progressions.", color: "#C87E96" },
+          ].map(({ val, label, desc, color }) => (
+            <SelectCard key={val} selected={answers.equipment === val} onClick={() => update("equipment", val)} color={color}>
+              <div style={{ fontSize: 13, color: answers.equipment === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
+            </SelectCard>
+          ))}
+        </div>
+      );
+
+      case "limitation": return (
+        <div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 6 OF {totalSteps}</div>
+          <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Any current limitations?</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>The program will substitute or modify affected movements. You can always update this later via the AI tab.</div>
+          {[
+            { val: "none",           label: "None — train fully",                    desc: "No restrictions. Full exercise selection.", color: C.green },
+            { val: "upper_cautious", label: "Upper body — pain-free but cautious",   desc: "Shoulder, elbow, or wrist history. Conservative pressing progression. Landmine entry point.", color: C.accent },
+            { val: "upper_pain",     label: "Upper body — currently uncomfortable",  desc: "Active shoulder, elbow, or wrist pain. Pressing replaced with band/push-up work only.", color: C.red },
+            { val: "lower_cautious", label: "Lower body — pain-free but cautious",   desc: "Knee, hip, or back history. Split squats replaced. Hinge load reduced.", color: C.accent },
+            { val: "lower_pain",     label: "Lower body — currently uncomfortable",  desc: "Active knee, hip, or back pain. Squats and heavy hinges replaced with low-load alternatives.", color: C.red },
+            { val: "both_pain",      label: "Both upper and lower limitations",      desc: "Multiple active restrictions. Conservative across all movement patterns.", color: "#A07EC8" },
+          ].map(({ val, label, desc, color }) => (
+            <SelectCard key={val} selected={answers.limitation === val} onClick={() => update("limitation", val)} color={color}>
+              <div style={{ fontSize: 13, color: answers.limitation === val ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>{label}</div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{desc}</div>
+            </SelectCard>
+          ))}
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>TRAINING LAYOFF</div>
+            {[
+              { val: 0, label: "No layoff — continuous training" },
+              { val: 3, label: "1–4 weeks off" },
+              { val: 6, label: "4–8 weeks off" },
+              { val: 10, label: "8+ weeks off" },
+            ].map(({ val, label }) => (
+              <div key={val} onClick={() => update("layoffWeeks", val)} style={{
+                display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "pointer", padding: "8px 12px",
+                background: answers.layoffWeeks === val ? `${C.accent}12` : C.card,
+                border: `1px solid ${answers.layoffWeeks === val ? C.accent : C.border}`, borderRadius: 5,
+              }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: answers.layoffWeeks === val ? C.accent : C.border, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: answers.layoffWeeks === val ? C.text : C.muted, ...mono }}>{label}</span>
+              </div>
+            ))}
           </div>
-          <SelectCard selected={answers.thuEnv === "outdoor"} onClick={() => update("thuEnv", "outdoor")} color={C.green}>
-            <div style={{ fontSize: 13, color: answers.thuEnv === "outdoor" ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>Option A — Outdoor (Preferred)</div>
-            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>Weighted ruck (30–40 lbs, 30–45 min) + Bulgarian Split Squat + KB Swings. Highest-value session for longevity.</div>
-          </SelectCard>
-          <SelectCard selected={answers.thuEnv === "gym"} onClick={() => update("thuEnv", "gym")} color={C.blue}>
-            <div style={{ fontSize: 13, color: answers.thuEnv === "gym" ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>Option B — Gym</div>
-            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>High Bar Squat + Walking Lunge + Trap Bar Carry + Step-Up. Use when outdoor access isn't available.</div>
-          </SelectCard>
-          <SelectCard selected={answers.thuEnv === "both"} onClick={() => update("thuEnv", "both")} color={C.accent}>
-            <div style={{ fontSize: 13, color: answers.thuEnv === "both" ? C.text : C.muted, fontWeight: 600, marginBottom: 3, ...mono }}>Decide week-to-week</div>
-            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>Load outdoor as default. You can swap to gym Option B any week via the AI Update tab.</div>
-          </SelectCard>
         </div>
       );
 
       case "baselines": return (
         <div>
-          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 5 OF 5</div>
+          <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 10, ...mono }}>STEP 7 OF {totalSteps}</div>
           <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>Baseline numbers.</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
-            Used to track your reconditioning progress and calculate working weight as a percentage of your pre-layoff PR. Skip any you don't know.
-          </div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>Used to track progress and suggest working weights. Skip any you don't know — you can add them later.</div>
 
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>TRAP BAR DEADLIFT — PRE-LAYOFF PR (lbs)</div>
-            <input type="number" value={answers.dlPR} onChange={e => update("dlPR", e.target.value)}
-              placeholder="e.g. 405"
-              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.accent, padding: "12px 14px", fontSize: 22, fontWeight: 700, outline: "none", width: "100%", textAlign: "center", ...mono }}
-              onFocus={e => e.target.style.borderColor = C.accent}
-              onBlur={e => e.target.style.borderColor = C.border}
-            />
-            {answers.dlPR && <div style={{ fontSize: 10, color: C.muted, marginTop: 6, textAlign: "center", ...mono }}>
-              Week 1 working weight recommendation: {Math.round(+answers.dlPR * 0.55)}–{Math.round(+answers.dlPR * 0.62)} lbs (~55–62% of PR)
-            </div>}
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>CURRENT BODYWEIGHT (lbs)</div>
-            <input type="number" value={answers.bodyweight} onChange={e => update("bodyweight", e.target.value)}
-              placeholder="e.g. 190"
-              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "12px 14px", fontSize: 22, fontWeight: 700, outline: "none", width: "100%", textAlign: "center", ...mono }}
-              onFocus={e => e.target.style.borderColor = C.accent}
-              onBlur={e => e.target.style.borderColor = C.border}
-            />
-          </div>
-
+          {[
+            { key: "dlPR",       label: "Deadlift / Hinge PR (lbs)",  pct: [0.55, 0.62] },
+            { key: "squatPR",    label: "Squat PR (lbs)",              pct: [0.60, 0.67] },
+            { key: "bodyweight", label: "Current Bodyweight (lbs)",    pct: null },
+          ].map(({ key, label, pct }) => (
+            <div key={key} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 6, ...mono }}>{label.toUpperCase()}</div>
+              <input type="number" value={answers[key]} onChange={e => update(key, e.target.value)} placeholder="—"
+                style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.accent, padding: "12px 14px", fontSize: 22, fontWeight: 700, outline: "none", width: "100%", textAlign: "center", ...mono }}
+                onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border}
+              />
+              {pct && answers[key] && (
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 5, textAlign: "center", ...mono }}>
+                  Week 1 target: {Math.round(+answers[key] * pct[0])}–{Math.round(+answers[key] * pct[1])} lbs
+                </div>
+              )}
+            </div>
+          ))}
           <div style={{ background: C.faint, borderRadius: 5, padding: "10px 14px", fontSize: 11, color: C.muted, lineHeight: 1.6 }}>
-            Additional PRs (squat, press, etc.) can be added to individual exercises from the exercise card after your program loads.
+            Additional PRs can be added to individual exercise cards after your program loads.
           </div>
         </div>
       );
 
       case "summary": {
-        const goalLabels = { longevity: "Longevity & Healthspan", strength: "Strength & Performance", stamina: "Stamina & Work Capacity", body: "Body Composition" };
-        const shoulderLabels = { pain: "Still uncomfortable — push-ups only", cautious: "Pain-free but cautious — landmine entry", healed: "Fully recovered — full progression", none: "No shoulder history" };
-        const thuLabels = { outdoor: "Outdoor ruck (preferred)", gym: "Gym Option B", both: "Decide week-to-week (outdoor default)" };
-        const layoffLabels = { 0: "No layoff", 3: "1–4 weeks", 6: "4–8 weeks", 10: "8+ weeks" };
+        const { program: previewProg, days: previewDays } = buildProgram(answers);
+        const splitLabels = { upper_lower: "Upper / Lower", ppl: "Push / Pull / Legs", fullbody: "Full Body", conventional: "Conventional Split" };
+        const envLabels = { gym: "Gym only", outdoor: "Outdoor only", mix: "Mix of both" };
+        const eqLabels = { full: "Full gym", barbell: "Barbell + DBs", dumbbells: "Dumbbells only", kettlebells: "Kettlebells", bodyweight: "Bodyweight" };
+        const limLabels = { none: "None", upper_cautious: "Upper — cautious", upper_pain: "Upper — pain present", lower_cautious: "Lower — cautious", lower_pain: "Lower — pain present", both_pain: "Upper + lower" };
 
         return (
           <div>
@@ -1455,39 +1812,37 @@ function OnboardingWizard({ onComplete }) {
             <div style={{ ...serif, fontSize: 26, color: C.text, marginBottom: 6 }}>
               {answers.name ? `Here's your program, ${answers.name}.` : "Here's your Week 1 program."}
             </div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 22, lineHeight: 1.6 }}>
-              Review your setup below, then load the program. You can adjust anything from inside the app.
-            </div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 20, lineHeight: 1.6 }}>Review your setup, then load the program. Everything can be adjusted inside the app.</div>
 
             <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: "14px 16px", marginBottom: 16 }}>
               {[
-                ["Primary Goal",     goalLabels[answers.primaryGoal]],
-                ["Shoulder Status",  shoulderLabels[answers.shoulderStatus]],
-                ["Layoff Length",    layoffLabels[answers.layoffWeeks]],
-                ["Thursday",         thuLabels[answers.thuEnv]],
-                answers.dlPR ? ["DL Baseline PR", `${answers.dlPR} lbs`] : null,
+                ["Goal",         { longevity: "Longevity", strength: "Strength", stamina: "Stamina", body: "Body Comp" }[answers.primaryGoal]],
+                ["Split",        splitLabels[answers.split]],
+                ["Days/week",    `${answers.dayCount} days`],
+                ["Environment",  envLabels[answers.environment]],
+                ["Equipment",    eqLabels[answers.equipment]],
+                ["Limitations",  limLabels[answers.limitation]],
+                answers.dlPR ? ["DL PR", `${answers.dlPR} lbs`] : null,
+                answers.squatPR ? ["Squat PR", `${answers.squatPR} lbs`] : null,
                 answers.bodyweight ? ["Bodyweight", `${answers.bodyweight} lbs`] : null,
               ].filter(Boolean).map(([label, val]) => (
-                <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.faint}` }}>
-                  <span style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono, paddingTop: 2 }}>{label.toUpperCase()}</span>
-                  <span style={{ fontSize: 12, color: C.text, ...mono, textAlign: "right", maxWidth: "60%" }}>{val}</span>
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${C.faint}` }}>
+                  <span style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono }}>{label.toUpperCase()}</span>
+                  <span style={{ fontSize: 12, color: C.text, ...mono }}>{val}</span>
                 </div>
               ))}
             </div>
 
             <div style={{ background: "#0D1A0D", border: `1px solid #1E3A1E`, borderRadius: 6, padding: "12px 16px", marginBottom: 20 }}>
-              <div style={{ fontSize: 10, color: C.green, letterSpacing: 1, marginBottom: 6, ...mono }}>WEEK 1 STRUCTURE</div>
-              {[
-                ["MON", "Lower Strength", "Trap Bar DL · Goblet Squat · RDL · Carries"],
-                ["TUE", "Upper Pull + Rehab", "DB Row · Pull-Up · Face Pull · Band Work"],
-                ["THU", answers.thuEnv === "gym" ? "Lower Stamina — Gym" : "Lower Stamina — Outdoor", answers.thuEnv === "gym" ? "Squat · Lunge · Carry · Step-Up" : "Ruck · Split Squat · KB Swing"],
-                ["SAT", "Upper Push + Pull", answers.shoulderStatus === "pain" ? "Push-Up · Row · Band Work" : "Landmine Press · Row · Band Work"],
-              ].map(([day, focus, lifts]) => (
-                <div key={day} style={{ display: "flex", gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
-                  <span style={{ fontSize: 10, color: C.green, fontWeight: 700, ...mono, minWidth: 28 }}>{day}</span>
+              <div style={{ fontSize: 10, color: C.green, letterSpacing: 1, marginBottom: 10, ...mono }}>WEEK 1 SCHEDULE</div>
+              {previewDays.map(d => (
+                <div key={d.id} style={{ display: "flex", gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 10, color: C.green, fontWeight: 700, ...mono, minWidth: 30 }}>{d.label.slice(0, 3).toUpperCase()}</span>
                   <div>
-                    <div style={{ fontSize: 11, color: C.text, ...mono }}>{focus}</div>
-                    <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{lifts}</div>
+                    <div style={{ fontSize: 11, color: C.text, ...mono }}>{d.focus}</div>
+                    <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+                      {(previewProg[0]?.[d.id] ?? []).slice(0, 3).map(e => e.name).join(" · ")}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1510,57 +1865,29 @@ function OnboardingWizard({ onComplete }) {
         @keyframes fadeSlide { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
 
-      {/* Progress bar */}
       <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 2, background: C.faint, zIndex: 100 }}>
-        <div style={{
-          height: "100%", background: C.accent,
-          width: `${((step) / (ONBOARDING_STEPS.length - 1)) * 100}%`,
-          transition: "width .4s ease",
-        }} />
+        <div style={{ height: "100%", background: C.accent, width: `${(step / (ONBOARDING_STEPS.length - 1)) * 100}%`, transition: "width .4s ease" }} />
       </div>
 
-      {/* Header */}
       <div style={{ padding: "20px 24px 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 10, color: C.muted, letterSpacing: 2, ...mono }}>PERFORMANCE & LONGEVITY</div>
         {step > 0 && step < ONBOARDING_STEPS.length - 1 && (
-          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono }}>
-            {step} / {ONBOARDING_STEPS.length - 2}
-          </div>
+          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, ...mono }}>{step} / {totalSteps}</div>
         )}
       </div>
 
-      {/* Content */}
-      <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 24px 100px", animation: "fadeSlide .25s ease" }}
-        key={step}>
+      <div key={step} style={{ maxWidth: 560, margin: "0 auto", padding: "40px 24px 100px", animation: "fadeSlide .25s ease" }}>
         {stepContent()}
       </div>
 
-      {/* Navigation footer */}
-      <div style={{
-        position: "fixed", bottom: 0, left: 0, right: 0,
-        background: C.bg, borderTop: `1px solid ${C.border}`,
-        padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center",
-      }}>
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: C.bg, borderTop: `1px solid ${C.border}`, padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         {step > 0 ? (
-          <button onClick={back} style={{
-            background: "none", border: `1px solid ${C.border}`, borderRadius: 5,
-            color: C.muted, padding: "10px 20px", cursor: "pointer",
-            fontSize: 10, fontWeight: 700, letterSpacing: 1, ...mono,
-          }}>← BACK</button>
+          <button onClick={back} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 5, color: C.muted, padding: "10px 20px", cursor: "pointer", fontSize: 10, fontWeight: 700, letterSpacing: 1, ...mono }}>← BACK</button>
         ) : <div />}
-
         {isLast ? (
-          <button onClick={finish} style={{
-            background: C.green, border: "none", borderRadius: 5,
-            color: "#000", padding: "12px 32px", cursor: "pointer",
-            fontSize: 11, fontWeight: 700, letterSpacing: 2, ...mono,
-          }}>LOAD MY PROGRAM →</button>
+          <button onClick={finish} style={{ background: C.green, border: "none", borderRadius: 5, color: "#000", padding: "12px 32px", cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 2, ...mono }}>LOAD MY PROGRAM →</button>
         ) : (
-          <button onClick={next} style={{
-            background: C.accent, border: "none", borderRadius: 5,
-            color: "#000", padding: "12px 28px", cursor: "pointer",
-            fontSize: 11, fontWeight: 700, letterSpacing: 2, ...mono,
-          }}>{step === 0 ? "GET STARTED →" : "NEXT →"}</button>
+          <button onClick={next} style={{ background: C.accent, border: "none", borderRadius: 5, color: "#000", padding: "12px 28px", cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 2, ...mono }}>{step === 0 ? "GET STARTED →" : "NEXT →"}</button>
         )}
       </div>
     </div>
@@ -1571,6 +1898,7 @@ function OnboardingWizard({ onComplete }) {
 export default function App() {
   const [program, setProgram]               = useState({});
   const [log, setLog]                       = useState({});
+  const [days, setDays]                     = useState(DAYS);
   const [loaded, setLoaded]                 = useState(false);
   const [saving, setSaving]                 = useState(false);
   const [weekIdx, setWeekIdx]               = useState(0);
@@ -1583,8 +1911,8 @@ export default function App() {
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
-          const { program: p, log: l } = JSON.parse(saved);
-          if (p) setProgram(p); if (l) setLog(l);
+          const { program: p, log: l, days: d } = JSON.parse(saved);
+          if (p) setProgram(p); if (l) setLog(l); if (d) setDays(d);
         } else {
           setShowOnboarding(true);
         }
@@ -1593,11 +1921,11 @@ export default function App() {
     })();
   }, []);
 
-  const persist = useCallback((p, l) => {
+  const persist = useCallback((p, l, d) => {
     setSaving(true);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: p, log: l })); } catch (_) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: p, log: l, days: d || days })); } catch (_) {}
     setTimeout(() => setSaving(false), 700);
-  }, []);
+  }, [days]);
 
   const updateProgram = useCallback((wi, dayId, exercises) => {
     setProgram(prev => { const np = { ...prev, [wi]: { ...(prev[wi] ?? {}), [dayId]: exercises } }; persist(np, log); return np; });
@@ -1619,8 +1947,8 @@ export default function App() {
   }, [log, persist]);
 
   const allPRs = {};
-  Object.entries(log).forEach(([wi, days]) =>
-    Object.entries(days).forEach(([dayId, exs]) =>
+  Object.entries(log).forEach(([wi, dayMap]) =>
+    Object.entries(dayMap).forEach(([dayId, exs]) =>
       Object.entries(exs).forEach(([name, data]) => {
         const weights = (data.sets ?? []).map(s => +s.weight).filter(Boolean);
         if (weights.length) allPRs[`${wi}_${dayId}_${name}`] = Math.max(...weights);
@@ -1628,16 +1956,17 @@ export default function App() {
     )
   );
 
-  const weekHasData = (wi) => DAYS.some(d =>
+  const weekHasData = (wi) => days.some(d =>
     (program[wi]?.[d.id] ?? []).some(ex => (log[wi]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps))
   );
 
-  const handleOnboardingComplete = useCallback((generatedProgram, answers) => {
+  const handleOnboardingComplete = useCallback((generatedProgram, generatedDays, answers) => {
     setProgram(generatedProgram);
     setLog({});
+    setDays(generatedDays);
     setShowOnboarding(false);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: generatedProgram, log: {} }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: generatedProgram, log: {}, days: generatedDays }));
     } catch (_) {}
   }, []);
 
@@ -1711,7 +2040,7 @@ export default function App() {
 
             {/* Day selector */}
             <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-              {DAYS.map((d, i) => {
+              {days.map((d, i) => {
                 const hasLog = (program[weekIdx]?.[d.id] ?? []).some(ex =>
                   (log[weekIdx]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps)
                 );
@@ -1733,7 +2062,7 @@ export default function App() {
             <ReadinessBanner />
 
             <DayPanel
-              day={DAYS[dayIdx]} weekIdx={weekIdx}
+              day={days[dayIdx]} weekIdx={weekIdx}
               program={program} log={log}
               onUpdateProgram={updateProgram} onUpdateLog={updateLog}
               allPRs={allPRs}
