@@ -839,12 +839,12 @@ function AIUpdater({ onApplyUpdate, currentProgram }) {
   const SYSTEM = `You are a strength coach assistant for a 37-year-old male athlete (5'10", 190 lbs) in a 12-week reconditioning program after a 6-week shoulder layoff. Goals: longevity, functional stamina, body composition.
 
 Program: program[weekIndex][dayId] = exercises[].
-weekIndex 0–11. dayIds: "mon" (Lower-Strength), "tue" (Upper-Pull+Rehab), "thu" (Lower-Stamina), "sat" (Upper-Push+Pull).
+CRITICAL: weekIndex is 0-based (0–11), but the user refers to weeks using 1-based human numbering ("Week 1" = weekIndex 0, "Week 2" = weekIndex 1, "Week 3" = weekIndex 2, etc.). Always subtract 1 from any week number the user mentions before using it as weekIndex in your response.
+
+dayIds vary by program structure — use the exact dayIds present in the "Current program" JSON provided. Do not assume mon/tue/thu/sat; read the actual keys.
 
 Exercise fields: { name, sets (number), reps (string), rpe (number|null), category, note, pr (number|null) }
 Categories: hinge, squat, pull, push, carry, rehab, core, accessory, cardio
-
-Shoulder constraint: Week 1–2 pressing = Landmine Press only. DB Floor Press allowed Week 3+. Incline DB Press Week 4+. Flat bench Week 5+ only if pain-free.
 
 Respond ONLY with valid JSON:
 {
@@ -853,6 +853,7 @@ Respond ONLY with valid JSON:
   "changes": [{ "week": 0, "day": "mon", "exercises": [...full array...] }]
 }
 
+"week" in your response must be the 0-based weekIndex (Week 1 → 0, Week 2 → 1, etc.).
 Never change log data. No text outside JSON.`;
 
   const run = async () => {
@@ -864,7 +865,7 @@ Never change log data. No text outside JSON.`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 8000,
+          max_tokens: 4096,
           system: SYSTEM,
           messages: [{ role: "user", content: `Current program:\n${JSON.stringify(currentProgram, null, 2)}\n\nRequest: ${prompt}` }],
         }),
