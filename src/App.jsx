@@ -830,14 +830,44 @@ function ProgressTab({ program, log }) {
 }
 
 // ─── AI Updater ───────────────────────────────────────────────────────────────
-function AIUpdater({ onApplyUpdate, currentProgram }) {
+function AIUpdater({ onApplyUpdate, currentProgram, userAnswers }) {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  const SYSTEM = `You are a strength coach assistant for a 37-year-old male athlete (5'10", 190 lbs) in a 12-week reconditioning program after a 6-week shoulder layoff. Goals: longevity, functional stamina, body composition.
+  const limLabels = {
+    none: "No current limitations.",
+    upper_cautious: "Upper body — pain-free but cautious. Favor shoulder-friendly pressing (landmine, neutral grip). Avoid heavy bench/overhead press.",
+    upper_pain: "Upper body — active pain. Pressing must stay bodyweight/band-based (push-ups, band work). Do not add barbell or heavy DB pressing.",
+    lower_cautious: "Lower body — pain-free but cautious. Avoid Bulgarian split squats and high-RPE hinges. Favor step-ups and moderate loads.",
+    lower_pain: "Lower body — active pain. Avoid squats and heavy hinges entirely. Use leg press, glute bridges, and low-load alternatives.",
+    both_pain: "Both upper and lower limitations — apply all upper and lower pain constraints together.",
+  };
+  const eqLabels = {
+    full: "Full commercial gym — all equipment available.",
+    barbell: "Barbell + rack + dumbbells only — no cables or machines.",
+    dumbbells: "Dumbbells only — no barbell movements.",
+    kettlebells: "Kettlebells primary — favor swings, cleans, carries, KB presses.",
+    bodyweight: "Bodyweight only — no external load equipment.",
+  };
+  const goalLabels = {
+    longevity: "Longevity & healthspan — prioritize movement quality and joint-friendly loading over max intensity.",
+    strength: "Strength & performance — favor progressive overload on compound lifts.",
+    stamina: "Stamina & work capacity — favor higher-rep carries, conditioning, and circuit-style work.",
+    body: "Body composition — favor moderate-to-higher rep ranges and metabolic stress.",
+  };
 
+  const userConstraints = userAnswers ? `
+USER CONSTRAINTS (must be respected in all changes):
+- Limitation: ${limLabels[userAnswers.limitation] || "None specified."}
+- Equipment: ${eqLabels[userAnswers.equipment] || "Not specified — assume full gym."}
+- Goal emphasis: ${goalLabels[userAnswers.primaryGoal] || "Not specified."}
+- Environment: ${userAnswers.environment === "outdoor" ? "Outdoor sessions preferred/available." : userAnswers.environment === "gym" ? "Gym only — no outdoor sessions." : "Mix of gym and outdoor."}
+` : "";
+
+  const SYSTEM = `You are a strength coach assistant for an athlete in a 12-week reconditioning program. Goals: longevity, functional stamina, body composition.
+${userConstraints}
 Program: program[weekIndex][dayId] = exercises[].
 CRITICAL: weekIndex is 0-based (0–11), but the user refers to weeks using 1-based human numbering ("Week 1" = weekIndex 0, "Week 2" = weekIndex 1, "Week 3" = weekIndex 2, etc.). Always subtract 1 from any week number the user mentions before using it as weekIndex in your response.
 
@@ -1498,6 +1528,7 @@ export default function App() {
   const [dayIdx, setDayIdx]   = useState(0);
   const [tab, setTab]         = useState("log");
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [answers, setAnswers] = useState(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const syncTimeoutRef        = useRef(null);
 
@@ -1530,11 +1561,12 @@ export default function App() {
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
-          const { program: p, log: l, days: d } = JSON.parse(saved);
+          const { program: p, log: l, days: d, answers: a } = JSON.parse(saved);
           if (p) { setProgram(p); hasData = true; }
           if (l) setLog(l);
           if (Array.isArray(d) && d.length > 0) setDays(d);
           else if (p) setDays(daysFromProgram(p));
+          if (a) setAnswers(a);
         }
       } catch (_) {}
       setLoaded(true);
@@ -1547,7 +1579,8 @@ export default function App() {
             setLog(data.log || {});
             const resolvedDays = (Array.isArray(data.days) && data.days.length > 0) ? data.days : daysFromProgram(data.program);
             setDays(resolvedDays);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: data.program, log: data.log, days: resolvedDays }));
+            if (data.answers) setAnswers(data.answers);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: data.program, log: data.log, days: resolvedDays, answers: data.answers }));
             hasData = true;
           }
         } catch (_) {}
@@ -1563,18 +1596,18 @@ export default function App() {
     clearTimeout(syncTimeoutRef.current);
     syncTimeoutRef.current = setTimeout(async () => {
       setSyncing(true);
-      try { await saveToSupabase(user.id, p, l, days); } catch (_) {}
+      try { await saveToSupabase(user.id, p, l, days, answers); } catch (_) {}
       setSyncing(false);
     }, 3000);
-  }, [user, days]);
+  }, [user, days, answers]);
 
   // ── Persist (local + cloud) ────────────────────────────────────────────────
   const persist = useCallback((p, l) => {
     setSaving(true);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: p, log: l, days })); } catch (_) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: p, log: l, days, answers })); } catch (_) {}
     setTimeout(() => setSaving(false), 400);
     syncToCloud(p, l);
-  }, [syncToCloud, days]);
+  }, [syncToCloud, days, answers]);
 
   const updateProgram = useCallback((wi, dayId, exercises) => {
     setProgram(prev => { const np = { ...prev, [wi]: { ...(prev[wi] ?? {}), [dayId]: exercises } }; persist(np, log); return np; });
@@ -1599,14 +1632,15 @@ export default function App() {
 
   const weekHasData = (wi) => days.some(d => (program[wi]?.[d.id] ?? []).some(ex => (log[wi]?.[d.id]?.[ex.name]?.sets ?? []).some(s => s.weight && s.reps)));
 
-  const handleOnboardingComplete = useCallback((generatedProgram, generatedDays) => {
+  const handleOnboardingComplete = useCallback((generatedProgram, generatedDays, generatedAnswers) => {
     setProgram(generatedProgram);
     setLog({});
     setDays(generatedDays);
+    setAnswers(generatedAnswers);
     setShowOnboarding(false);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: generatedProgram, log: {}, days: generatedDays })); } catch (_) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: generatedProgram, log: {}, days: generatedDays, answers: generatedAnswers })); } catch (_) {}
     if (user && navigator.onLine) {
-      saveToSupabase(user.id, generatedProgram, {}, generatedDays).catch(() => {});
+      saveToSupabase(user.id, generatedProgram, {}, generatedDays, generatedAnswers).catch(() => {});
     }
   }, [user]);
 
@@ -1621,6 +1655,7 @@ export default function App() {
     setProgram({});
     setLog({});
     setDays(DAYS);
+    setAnswers(null);
     setWeekIdx(0);
     setDayIdx(0);
     setConfirmReset(false);
@@ -1720,7 +1755,7 @@ export default function App() {
           </>
         )}
         {tab === "progress" && <ProgressTab program={program} log={log} />}
-        {tab === "ai" && <AIUpdater onApplyUpdate={applyAIUpdate} currentProgram={program} />}
+        {tab === "ai" && <AIUpdater onApplyUpdate={applyAIUpdate} currentProgram={program} userAnswers={answers} />}
       </div>
     </div>
   );
