@@ -1686,7 +1686,9 @@ export default function App() {
               })}
             </div>
             <ReadinessBanner />
-            <DayPanel day={days[safeDayIdx]} weekIdx={weekIdx} program={program} log={log} onUpdateProgram={updateProgram} onUpdateLog={updateLog} allPRs={allPRs} />
+            {days.length > 0 && days[safeDayIdx] && (
+              <DayPanel day={days[safeDayIdx]} weekIdx={weekIdx} program={program} log={log} onUpdateProgram={updateProgram} onUpdateLog={updateLog} allPRs={allPRs} />
+            )}
           </>
         )}
         {tab === "progress" && <ProgressTab program={program} log={log} />}
