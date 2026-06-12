@@ -863,7 +863,7 @@ Never change log data. No text outside JSON.`;
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           max_tokens: 2000,
           system: SYSTEM,
           messages: [{ role: "user", content: `Current program:\n${JSON.stringify(currentProgram, null, 2)}\n\nRequest: ${prompt}` }],
