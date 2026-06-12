@@ -11,6 +11,31 @@ const DAYS = [
   { id: "sat", label: "Saturday", focus: "Upper — Push + Pull",     env: "Gym"     },
 ];
 
+// Derive a days array from program keys when days metadata is missing/empty
+const DAY_LABELS = {
+  mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
+};
+const DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+function daysFromProgram(program) {
+  const week0 = program?.[0] || program?.["0"] || {};
+  const ids = Object.keys(week0).sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
+  if (ids.length === 0) return DAYS;
+  return ids.map(id => {
+    const known = DAYS.find(d => d.id === id);
+    const exercises = week0[id] || [];
+    const focus = known?.focus || (exercises[0]?.category
+      ? exercises[0].category.charAt(0).toUpperCase() + exercises[0].category.slice(1)
+      : "Training");
+    return {
+      id,
+      label: DAY_LABELS[id] || id.charAt(0).toUpperCase() + id.slice(1),
+      focus,
+      env: known?.env || "Gym",
+    };
+  });
+}
+
 const REST_BY_CATEGORY = {
   hinge: 210, squat: 180, pull: 90, push: 120,
   carry: 90, rehab: 60, core: 60, accessory: 60, cardio: 0,
@@ -1507,7 +1532,8 @@ export default function App() {
           const { program: p, log: l, days: d } = JSON.parse(saved);
           if (p) { setProgram(p); hasData = true; }
           if (l) setLog(l);
-          if (d) setDays(d);
+          if (Array.isArray(d) && d.length > 0) setDays(d);
+          else if (p) setDays(daysFromProgram(p));
         }
       } catch (_) {}
       setLoaded(true);
@@ -1518,8 +1544,9 @@ export default function App() {
           if (data?.program) {
             setProgram(data.program);
             setLog(data.log || {});
-            if (data.days) setDays(data.days);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: data.program, log: data.log, days: data.days }));
+            const resolvedDays = (Array.isArray(data.days) && data.days.length > 0) ? data.days : daysFromProgram(data.program);
+            setDays(resolvedDays);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ program: data.program, log: data.log, days: resolvedDays }));
             hasData = true;
           }
         } catch (_) {}
